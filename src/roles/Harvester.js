@@ -198,12 +198,9 @@ class Harvester {
                 creep.memory.harvestPos.roomName
             );
             
-            // If not at position, move there
+            // If not at position, move there with obstacle avoidance
             if (!creep.pos.isEqualTo(targetPos)) {
-                creep.moveTo(targetPos, {
-                    visualizePathStyle: { stroke: '#ffaa00' },
-                    range: 0
-                });
+                this.moveToHarvestPosition(creep, targetPos);
                 return;
             }
             
@@ -212,6 +209,137 @@ class Harvester {
         } else {
             // Couldn't find a position, fall back to traditional
             this.runTraditional(creep);
+        }
+    }
+    
+    /**
+     * Move to harvest position with obstacle avoidance
+     * If path is blocked, request other creeps to move
+     */
+    moveToHarvestPosition(creep, targetPos) {
+        // First try normal move
+        const moveResult = creep.moveTo(targetPos, {
+            visualizePathStyle: { stroke: '#ffaa00' },
+            range: 0,
+            reusePath: 5
+        });
+        
+        if (moveResult === ERR_NO_PATH || moveResult === ERR_INVALID_TARGET) {
+            // Path is blocked - check what's blocking
+            const blockingCreep = this.getBlockingCreep(creep, targetPos);
+            
+            if (blockingCreep) {
+                // Ask blocking creep to move
+                this.requestCreepToMove(blockingCreep, creep);
+                
+                // Try alternative path
+                creep.moveTo(targetPos, {
+                    visualizePathStyle: { stroke: '#ffaa00' },
+                    range: 0,
+                    ignoreCreeps: true,
+                    reusePath: 0
+                });
+            }
+        }
+        
+        // If we're still not there after multiple ticks, force path clear
+        if (!creep.pos.isEqualTo(targetPos)) {
+            if (!creep.memory.stuckTicks) {
+                creep.memory.stuckTicks = 0;
+            }
+            creep.memory.stuckTicks++;
+            
+            // If stuck for too long, try to swap positions with blocking creep
+            if (creep.memory.stuckTicks > 3) {
+                const blockingCreep = this.getBlockingCreep(creep, targetPos);
+                if (blockingCreep && blockingCreep.memory.role !== 'harvester') {
+                    // Non-harvesters should move away immediately
+                    this.pushCreep(blockingCreep, creep);
+                    creep.say('🚶 move!');
+                }
+                creep.memory.stuckTicks = 0;
+            }
+        } else {
+            creep.memory.stuckTicks = 0;
+        }
+    }
+    
+    /**
+     * Get the creep that is blocking our path to target
+     */
+    getBlockingCreep(creep, targetPos) {
+        // Look for creeps on our target position
+        const creepsAtTarget = targetPos.lookFor(LOOK_CREEPS);
+        if (creepsAtTarget.length > 0) {
+            return creepsAtTarget[0];
+        }
+        
+        // Look for creeps in the way
+        const path = creep.pos.findPathTo(targetPos, {
+            ignoreCreeps: false,
+            range: 0
+        });
+        
+        if (path.length > 0) {
+            const nextPos = new RoomPosition(path[0].x, path[0].y, creep.room.name);
+            const creepsAtNext = nextPos.lookFor(LOOK_CREEPS);
+            if (creepsAtNext.length > 0) {
+                return creepsAtNext[0];
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Request a creep to move out of the way
+     */
+    requestCreepToMove(blockingCreep, requestingCreep) {
+        // Only non-harvesters should be asked to move
+        if (blockingCreep.memory.role === 'harvester') {
+            return; // Another harvester, both should find different positions
+        }
+        
+        // Set memory flag for blocking creep to move
+        if (!blockingCreep.memory.moveRequest) {
+            blockingCreep.memory.moveRequest = {
+                fromX: requestingCreep.pos.x,
+                fromY: requestingCreep.pos.y,
+                time: Game.time
+            };
+            blockingCreep.say('🚶 ok!');
+        }
+    }
+    
+    /**
+     * Push a creep out of the way (more forceful)
+     */
+    pushCreep(blockingCreep, pushingCreep) {
+        // Calculate direction away from pushing creep
+        const dx = blockingCreep.pos.x - pushingCreep.pos.x;
+        const dy = blockingCreep.pos.y - pushingCreep.pos.y;
+        
+        // Normalize to -1, 0, or 1
+        const dirX = dx > 0 ? 1 : dx < 0 ? -1 : 0;
+        const dirY = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+        
+        // Try to move in the opposite direction
+        const targetX = blockingCreep.pos.x + dirX;
+        const targetY = blockingCreep.pos.y + dirY;
+        
+        if (targetX >= 0 && targetX <= 49 && targetY >= 0 && targetY <= 49) {
+            const pos = new RoomPosition(targetX, targetY, blockingCreep.room.name);
+            const terrain = pos.lookFor(LOOK_TERRAIN);
+            
+            if (terrain[0] !== 'wall') {
+                const structures = pos.lookFor(LOOK_STRUCTURES);
+                const creeps = pos.lookFor(LOOK_CREEPS);
+                
+                if (structures.length === 0 && creeps.length === 0) {
+                    blockingCreep.moveTo(pos);
+                    blockingCreep.say('😓 moved');
+                }
+            }
         }
     }
     

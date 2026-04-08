@@ -2,7 +2,7 @@
 
 // ============================================
 // Mokito Bot - Combined Build
-// Built: 2026-04-08T10:33:14.610Z
+// Built: 2026-04-08T10:38:32.666Z
 // ============================================
 
 
@@ -205,12 +205,9 @@ class Harvester {
                 creep.memory.harvestPos.roomName
             );
             
-            // If not at position, move there
+            // If not at position, move there with obstacle avoidance
             if (!creep.pos.isEqualTo(targetPos)) {
-                creep.moveTo(targetPos, {
-                    visualizePathStyle: { stroke: '#ffaa00' },
-                    range: 0
-                });
+                this.moveToHarvestPosition(creep, targetPos);
                 return;
             }
             
@@ -219,6 +216,137 @@ class Harvester {
         } else {
             // Couldn't find a position, fall back to traditional
             this.runTraditional(creep);
+        }
+    }
+    
+    /**
+     * Move to harvest position with obstacle avoidance
+     * If path is blocked, request other creeps to move
+     */
+    moveToHarvestPosition(creep, targetPos) {
+        // First try normal move
+        const moveResult = creep.moveTo(targetPos, {
+            visualizePathStyle: { stroke: '#ffaa00' },
+            range: 0,
+            reusePath: 5
+        });
+        
+        if (moveResult === ERR_NO_PATH || moveResult === ERR_INVALID_TARGET) {
+            // Path is blocked - check what's blocking
+            const blockingCreep = this.getBlockingCreep(creep, targetPos);
+            
+            if (blockingCreep) {
+                // Ask blocking creep to move
+                this.requestCreepToMove(blockingCreep, creep);
+                
+                // Try alternative path
+                creep.moveTo(targetPos, {
+                    visualizePathStyle: { stroke: '#ffaa00' },
+                    range: 0,
+                    ignoreCreeps: true,
+                    reusePath: 0
+                });
+            }
+        }
+        
+        // If we're still not there after multiple ticks, force path clear
+        if (!creep.pos.isEqualTo(targetPos)) {
+            if (!creep.memory.stuckTicks) {
+                creep.memory.stuckTicks = 0;
+            }
+            creep.memory.stuckTicks++;
+            
+            // If stuck for too long, try to swap positions with blocking creep
+            if (creep.memory.stuckTicks > 3) {
+                const blockingCreep = this.getBlockingCreep(creep, targetPos);
+                if (blockingCreep && blockingCreep.memory.role !== 'harvester') {
+                    // Non-harvesters should move away immediately
+                    this.pushCreep(blockingCreep, creep);
+                    creep.say('🚶 move!');
+                }
+                creep.memory.stuckTicks = 0;
+            }
+        } else {
+            creep.memory.stuckTicks = 0;
+        }
+    }
+    
+    /**
+     * Get the creep that is blocking our path to target
+     */
+    getBlockingCreep(creep, targetPos) {
+        // Look for creeps on our target position
+        const creepsAtTarget = targetPos.lookFor(LOOK_CREEPS);
+        if (creepsAtTarget.length > 0) {
+            return creepsAtTarget[0];
+        }
+        
+        // Look for creeps in the way
+        const path = creep.pos.findPathTo(targetPos, {
+            ignoreCreeps: false,
+            range: 0
+        });
+        
+        if (path.length > 0) {
+            const nextPos = new RoomPosition(path[0].x, path[0].y, creep.room.name);
+            const creepsAtNext = nextPos.lookFor(LOOK_CREEPS);
+            if (creepsAtNext.length > 0) {
+                return creepsAtNext[0];
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Request a creep to move out of the way
+     */
+    requestCreepToMove(blockingCreep, requestingCreep) {
+        // Only non-harvesters should be asked to move
+        if (blockingCreep.memory.role === 'harvester') {
+            return; // Another harvester, both should find different positions
+        }
+        
+        // Set memory flag for blocking creep to move
+        if (!blockingCreep.memory.moveRequest) {
+            blockingCreep.memory.moveRequest = {
+                fromX: requestingCreep.pos.x,
+                fromY: requestingCreep.pos.y,
+                time: Game.time
+            };
+            blockingCreep.say('🚶 ok!');
+        }
+    }
+    
+    /**
+     * Push a creep out of the way (more forceful)
+     */
+    pushCreep(blockingCreep, pushingCreep) {
+        // Calculate direction away from pushing creep
+        const dx = blockingCreep.pos.x - pushingCreep.pos.x;
+        const dy = blockingCreep.pos.y - pushingCreep.pos.y;
+        
+        // Normalize to -1, 0, or 1
+        const dirX = dx > 0 ? 1 : dx < 0 ? -1 : 0;
+        const dirY = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+        
+        // Try to move in the opposite direction
+        const targetX = blockingCreep.pos.x + dirX;
+        const targetY = blockingCreep.pos.y + dirY;
+        
+        if (targetX >= 0 && targetX <= 49 && targetY >= 0 && targetY <= 49) {
+            const pos = new RoomPosition(targetX, targetY, blockingCreep.room.name);
+            const terrain = pos.lookFor(LOOK_TERRAIN);
+            
+            if (terrain[0] !== 'wall') {
+                const structures = pos.lookFor(LOOK_STRUCTURES);
+                const creeps = pos.lookFor(LOOK_CREEPS);
+                
+                if (structures.length === 0 && creeps.length === 0) {
+                    blockingCreep.moveTo(pos);
+                    blockingCreep.say('😓 moved');
+                }
+            }
         }
     }
     
@@ -340,6 +468,20 @@ class Harvester {
  */
 class Runner {
     run(creep) {
+        // Check if a harvester requested us to move
+        if (creep.memory.moveRequest) {
+            const timeSinceRequest = Game.time - creep.memory.moveRequest.time;
+            if (timeSinceRequest < 5) {
+                // Move away from the harvester
+                this.moveAway(creep, creep.memory.moveRequest.fromX, creep.memory.moveRequest.fromY);
+                creep.say('🚶 moving');
+                return;
+            } else {
+                // Request expired
+                delete creep.memory.moveRequest;
+            }
+        }
+        
         // State: collecting or delivering
         if (creep.memory.delivering && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.delivering = false;
@@ -354,6 +496,64 @@ class Runner {
             this.deliverEnergy(creep);
         } else {
             this.collectEnergy(creep);
+        }
+    }
+    
+    /**
+     * Move away from a position (called when harvester needs the spot)
+     */
+    moveAway(creep, fromX, fromY) {
+        // Calculate direction away from the position
+        const dx = creep.pos.x - fromX;
+        const dy = creep.pos.y - fromY;
+        
+        // Normalize to -1, 0, or 1
+        const dirX = dx > 0 ? 1 : dx < 0 ? -1 : 0;
+        const dirY = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+        
+        // Try to move in the opposite direction
+        const targetX = creep.pos.x + dirX;
+        const targetY = creep.pos.y + dirY;
+        
+        if (targetX >= 0 && targetX <= 49 && targetY >= 0 && targetY <= 49) {
+            const pos = new RoomPosition(targetX, targetY, creep.room.name);
+            const terrain = pos.lookFor(LOOK_TERRAIN);
+            
+            if (terrain[0] !== 'wall') {
+                const structures = pos.lookFor(LOOK_STRUCTURES);
+                const creeps = pos.lookFor(LOOK_CREEPS);
+                
+                if (structures.length === 0 && creeps.length === 0) {
+                    creep.moveTo(pos);
+                    return;
+                }
+            }
+        }
+        
+        // If can't move away directly, try random adjacent position
+        const directions = [
+            {x: 0, y: -1}, {x: 1, y: -1}, {x: 1, y: 0}, {x: 1, y: 1},
+            {x: 0, y: 1}, {x: -1, y: 1}, {x: -1, y: 0}, {x: -1, y: -1}
+        ];
+        
+        for (const dir of directions) {
+            const newX = creep.pos.x + dir.x;
+            const newY = creep.pos.y + dir.y;
+            
+            if (newX >= 0 && newX <= 49 && newY >= 0 && newY <= 49) {
+                const pos = new RoomPosition(newX, newY, creep.room.name);
+                const terrain = pos.lookFor(LOOK_TERRAIN);
+                
+                if (terrain[0] !== 'wall') {
+                    const structures = pos.lookFor(LOOK_STRUCTURES);
+                    const creeps = pos.lookFor(LOOK_CREEPS);
+                    
+                    if (structures.length === 0 && creeps.length === 0) {
+                        creep.moveTo(pos);
+                        return;
+                    }
+                }
+            }
         }
     }
 
@@ -562,6 +762,20 @@ class Runner {
  */
 class Upgrader {
     run(creep) {
+        // Check if a harvester requested us to move
+        if (creep.memory.moveRequest) {
+            const timeSinceRequest = Game.time - creep.memory.moveRequest.time;
+            if (timeSinceRequest < 5) {
+                // Move away from the harvester
+                this.moveAway(creep, creep.memory.moveRequest.fromX, creep.memory.moveRequest.fromY);
+                creep.say('🚶 moving');
+                return;
+            } else {
+                // Request expired
+                delete creep.memory.moveRequest;
+            }
+        }
+
         // State management
         if (creep.memory.upgrading && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.upgrading = false;
@@ -578,6 +792,64 @@ class Upgrader {
         } else {
             // Collect energy - self-mine by default, but pick up dropped if available
             this.collectEnergy(creep);
+        }
+    }
+
+    /**
+     * Move away from a position (called when harvester needs the spot)
+     */
+    moveAway(creep, fromX, fromY) {
+        // Calculate direction away from the position
+        const dx = creep.pos.x - fromX;
+        const dy = creep.pos.y - fromY;
+
+        // Normalize to -1, 0, or 1
+        const dirX = dx > 0 ? 1 : dx < 0 ? -1 : 0;
+        const dirY = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+
+        // Try to move in the opposite direction
+        const targetX = creep.pos.x + dirX;
+        const targetY = creep.pos.y + dirY;
+
+        if (targetX >= 0 && targetX <= 49 && targetY >= 0 && targetY <= 49) {
+            const pos = new RoomPosition(targetX, targetY, creep.room.name);
+            const terrain = pos.lookFor(LOOK_TERRAIN);
+
+            if (terrain[0] !== 'wall') {
+                const structures = pos.lookFor(LOOK_STRUCTURES);
+                const creeps = pos.lookFor(LOOK_CREEPS);
+
+                if (structures.length === 0 && creeps.length === 0) {
+                    creep.moveTo(pos);
+                    return;
+                }
+            }
+        }
+
+        // If can't move away directly, try random adjacent position
+        const directions = [
+            {x: 0, y: -1}, {x: 1, y: -1}, {x: 1, y: 0}, {x: 1, y: 1},
+            {x: 0, y: 1}, {x: -1, y: 1}, {x: -1, y: 0}, {x: -1, y: -1}
+        ];
+
+        for (const dir of directions) {
+            const newX = creep.pos.x + dir.x;
+            const newY = creep.pos.y + dir.y;
+
+            if (newX >= 0 && newX <= 49 && newY >= 0 && newY <= 49) {
+                const pos = new RoomPosition(newX, newY, creep.room.name);
+                const terrain = pos.lookFor(LOOK_TERRAIN);
+
+                if (terrain[0] !== 'wall') {
+                    const structures = pos.lookFor(LOOK_STRUCTURES);
+                    const creeps = pos.lookFor(LOOK_CREEPS);
+
+                    if (structures.length === 0 && creeps.length === 0) {
+                        creep.moveTo(pos);
+                        return;
+                    }
+                }
+            }
         }
     }
 
@@ -656,6 +928,20 @@ class Upgrader {
  */
 class Builder {
     run(creep) {
+        // Check if a harvester requested us to move
+        if (creep.memory.moveRequest) {
+            const timeSinceRequest = Game.time - creep.memory.moveRequest.time;
+            if (timeSinceRequest < 5) {
+                // Move away from the harvester
+                this.moveAway(creep, creep.memory.moveRequest.fromX, creep.memory.moveRequest.fromY);
+                creep.say('🚶 moving');
+                return;
+            } else {
+                // Request expired
+                delete creep.memory.moveRequest;
+            }
+        }
+        
         // State management
         if (creep.memory.building && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.building = false;
@@ -672,6 +958,64 @@ class Builder {
         } else {
             // Collect dropped energy from ground
             this.collectEnergy(creep);
+        }
+    }
+    
+    /**
+     * Move away from a position (called when harvester needs the spot)
+     */
+    moveAway(creep, fromX, fromY) {
+        // Calculate direction away from the position
+        const dx = creep.pos.x - fromX;
+        const dy = creep.pos.y - fromY;
+        
+        // Normalize to -1, 0, or 1
+        const dirX = dx > 0 ? 1 : dx < 0 ? -1 : 0;
+        const dirY = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+        
+        // Try to move in the opposite direction
+        const targetX = creep.pos.x + dirX;
+        const targetY = creep.pos.y + dirY;
+        
+        if (targetX >= 0 && targetX <= 49 && targetY >= 0 && targetY <= 49) {
+            const pos = new RoomPosition(targetX, targetY, creep.room.name);
+            const terrain = pos.lookFor(LOOK_TERRAIN);
+            
+            if (terrain[0] !== 'wall') {
+                const structures = pos.lookFor(LOOK_STRUCTURES);
+                const creeps = pos.lookFor(LOOK_CREEPS);
+                
+                if (structures.length === 0 && creeps.length === 0) {
+                    creep.moveTo(pos);
+                    return;
+                }
+            }
+        }
+        
+        // If can't move away directly, try random adjacent position
+        const directions = [
+            {x: 0, y: -1}, {x: 1, y: -1}, {x: 1, y: 0}, {x: 1, y: 1},
+            {x: 0, y: 1}, {x: -1, y: 1}, {x: -1, y: 0}, {x: -1, y: -1}
+        ];
+        
+        for (const dir of directions) {
+            const newX = creep.pos.x + dir.x;
+            const newY = creep.pos.y + dir.y;
+            
+            if (newX >= 0 && newX <= 49 && newY >= 0 && newY <= 49) {
+                const pos = new RoomPosition(newX, newY, creep.room.name);
+                const terrain = pos.lookFor(LOOK_TERRAIN);
+                
+                if (terrain[0] !== 'wall') {
+                    const structures = pos.lookFor(LOOK_STRUCTURES);
+                    const creeps = pos.lookFor(LOOK_CREEPS);
+                    
+                    if (structures.length === 0 && creeps.length === 0) {
+                        creep.moveTo(pos);
+                        return;
+                    }
+                }
+            }
         }
     }
 
@@ -733,33 +1077,95 @@ class Builder {
     }
 
     build(creep) {
-        // Find construction sites
-        const target = creep.pos.findClosestByPath(FIND_CONSTRUCTION_SITES);
-
-        if (target) {
-            const result = creep.build(target);
-
-            if (result === ERR_NOT_IN_RANGE) {
-                creep.moveTo(target, {
-                    visualizePathStyle: { stroke: '#ffffff' }
-                });
-            } else if (result === OK) {
-                if (Game.time % 10 === 0) {
-                    creep.say('🔨 ' + creep.store[RESOURCE_ENERGY]);
-                }
-            }
-        } else {
-            // No construction sites - repair roads or containers
-            const didRepair = this.repair(creep);
+        // Find construction sites - prioritize defensive structures
+        const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+        
+        if (sites.length > 0) {
+            // Sort by priority: towers, ramparts, walls, then extensions/storage
+            const target = this.findPrioritySite(creep, sites);
             
-            // If nothing to repair either, upgrade controller as idle behavior
-            if (!didRepair) {
-                this.upgradeController(creep);
+            if (target) {
+                const result = creep.build(target);
+
+                if (result === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(target, {
+                        visualizePathStyle: { stroke: '#ffffff' }
+                    });
+                } else if (result === OK) {
+                    if (Game.time % 10 === 0) {
+                        creep.say('🔨 ' + creep.store[RESOURCE_ENERGY]);
+                    }
+                }
+                return;
             }
+        }
+        
+        // No construction sites - repair roads, containers, or defense structures
+        const didRepair = this.repair(creep);
+        
+        // If nothing to repair either, upgrade controller as idle behavior
+        if (!didRepair) {
+            this.upgradeController(creep);
         }
     }
 
+    findPrioritySite(creep, sites) {
+        // Priority order for construction:
+        // 1. Towers (defense)
+        // 2. Ramparts (defense)
+        // 3. Walls (defense)
+        // 4. Extensions (capacity)
+        // 5. Storage (logistics)
+        // 6. Other
+        
+        const priorityOrder = [
+            STRUCTURE_TOWER,
+            STRUCTURE_RAMPART,
+            STRUCTURE_WALL,
+            STRUCTURE_EXTENSION,
+            STRUCTURE_STORAGE,
+            STRUCTURE_LINK,
+            STRUCTURE_CONTAINER,
+            STRUCTURE_ROAD
+        ];
+        
+        // Group sites by structure type
+        const grouped = {};
+        for (const site of sites) {
+            if (!grouped[site.structureType]) {
+                grouped[site.structureType] = [];
+            }
+            grouped[site.structureType].push(site);
+        }
+        
+        // Check in priority order
+        for (const structureType of priorityOrder) {
+            if (grouped[structureType] && grouped[structureType].length > 0) {
+                // Find closest of this type
+                return creep.pos.findClosestByPath(grouped[structureType]);
+            }
+        }
+        
+        // Default to closest
+        return creep.pos.findClosestByPath(sites);
+    }
+
     repair(creep) {
+        // Priority 1: Repair defense structures (ramparts, walls)
+        const defense = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+            filter: (s) => (s.structureType === STRUCTURE_RAMPART ||
+                          s.structureType === STRUCTURE_WALL) &&
+                          s.hits < s.hitsMax
+        });
+
+        if (defense) {
+            if (creep.repair(defense) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(defense);
+            }
+            return true; // Found something to repair
+        }
+        
+        // Priority 2: Repair roads and containers
         const target = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: (s) => (s.structureType === STRUCTURE_ROAD ||
                           s.structureType === STRUCTURE_CONTAINER) &&
@@ -806,6 +1212,20 @@ class Builder {
  */
 class Repairer {
     run(creep) {
+        // Check if a harvester requested us to move
+        if (creep.memory.moveRequest) {
+            const timeSinceRequest = Game.time - creep.memory.moveRequest.time;
+            if (timeSinceRequest < 5) {
+                // Move away from the harvester
+                this.moveAway(creep, creep.memory.moveRequest.fromX, creep.memory.moveRequest.fromY);
+                creep.say('🚶 moving');
+                return;
+            } else {
+                // Request expired
+                delete creep.memory.moveRequest;
+            }
+        }
+        
         // State: repairing or collecting
         if (creep.memory.repairing && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.repairing = false;
@@ -820,6 +1240,64 @@ class Repairer {
             this.repair(creep);
         } else {
             this.collectEnergy(creep);
+        }
+    }
+    
+    /**
+     * Move away from a position (called when harvester needs the spot)
+     */
+    moveAway(creep, fromX, fromY) {
+        // Calculate direction away from the position
+        const dx = creep.pos.x - fromX;
+        const dy = creep.pos.y - fromY;
+        
+        // Normalize to -1, 0, or 1
+        const dirX = dx > 0 ? 1 : dx < 0 ? -1 : 0;
+        const dirY = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+        
+        // Try to move in the opposite direction
+        const targetX = creep.pos.x + dirX;
+        const targetY = creep.pos.y + dirY;
+        
+        if (targetX >= 0 && targetX <= 49 && targetY >= 0 && targetY <= 49) {
+            const pos = new RoomPosition(targetX, targetY, creep.room.name);
+            const terrain = pos.lookFor(LOOK_TERRAIN);
+            
+            if (terrain[0] !== 'wall') {
+                const structures = pos.lookFor(LOOK_STRUCTURES);
+                const creeps = pos.lookFor(LOOK_CREEPS);
+                
+                if (structures.length === 0 && creeps.length === 0) {
+                    creep.moveTo(pos);
+                    return;
+                }
+            }
+        }
+        
+        // If can't move away directly, try random adjacent position
+        const directions = [
+            {x: 0, y: -1}, {x: 1, y: -1}, {x: 1, y: 0}, {x: 1, y: 1},
+            {x: 0, y: 1}, {x: -1, y: 1}, {x: -1, y: 0}, {x: -1, y: -1}
+        ];
+        
+        for (const dir of directions) {
+            const newX = creep.pos.x + dir.x;
+            const newY = creep.pos.y + dir.y;
+            
+            if (newX >= 0 && newX <= 49 && newY >= 0 && newY <= 49) {
+                const pos = new RoomPosition(newX, newY, creep.room.name);
+                const terrain = pos.lookFor(LOOK_TERRAIN);
+                
+                if (terrain[0] !== 'wall') {
+                    const structures = pos.lookFor(LOOK_STRUCTURES);
+                    const creeps = pos.lookFor(LOOK_CREEPS);
+                    
+                    if (structures.length === 0 && creeps.length === 0) {
+                        creep.moveTo(pos);
+                        return;
+                    }
+                }
+            }
         }
     }
 
@@ -1158,7 +1636,12 @@ class MemoryManager {
 // --- ConstructionManager.js ---
 /**
  * ConstructionManager - Plans and initiates construction of room structures
- * Priorities: Roads for efficiency, Extensions for bigger creeps, Towers/Storage
+ * Priorities:
+ * 1. Roads for efficiency
+ * 2. Extensions for bigger creeps
+ * 3. Towers for defense
+ * 4. Ramparts/Walls for base defense
+ * 5. Storage
  */
 class ConstructionManager {
     run(room) {
@@ -1175,7 +1658,8 @@ class ConstructionManager {
         if (!Memory.rooms[room.name].construction) {
             Memory.rooms[room.name].construction = {
                 roadsPlanned: false,
-                lastRoadBuild: 0
+                lastRoadBuild: 0,
+                defensePlanned: false
             };
         }
         
@@ -1192,6 +1676,11 @@ class ConstructionManager {
         
         if (rcl >= 4) {
             this.buildStorage(room);
+            this.buildRamparts(room); // Build ramparts around spawn
+        }
+        
+        if (rcl >= 5) {
+            this.buildWalls(room); // Build walls for outer defense
         }
     }
     
@@ -1219,6 +1708,39 @@ class ConstructionManager {
         if (room.controller) {
             for (const source of sources) {
                 this.buildRoad(room, source.pos, room.controller.pos);
+            }
+        }
+        
+        // Priority 5: Roads around important structures for defense mobility
+        this.buildRoadsAroundStructures(room, spawn.pos);
+    }
+    
+    buildRoadsAroundStructures(room, spawnPos) {
+        // Build roads in a defensive grid around spawn
+        const offsets = [
+            {x: -2, y: -2}, {x: 0, y: -2}, {x: 2, y: -2},
+            {x: -2, y: 0},                 {x: 2, y: 0},
+            {x: -2, y: 2},  {x: 0, y: 2},  {x: 2, y: 2}
+        ];
+        
+        for (const offset of offsets) {
+            const x = spawnPos.x + offset.x;
+            const y = spawnPos.y + offset.y;
+            
+            if (x > 0 && x < 49 && y > 0 && y < 49) {
+                const pos = new RoomPosition(x, y, room.name);
+                const terrain = pos.lookFor(LOOK_TERRAIN);
+                
+                if (terrain[0] !== 'wall') {
+                    const structures = pos.lookFor(LOOK_STRUCTURES);
+                    const hasRoad = structures.some(s => s.structureType === STRUCTURE_ROAD);
+                    const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+                    
+                    if (!hasRoad && sites.length === 0) {
+                        pos.createConstructionSite(STRUCTURE_ROAD);
+                        return;
+                    }
+                }
             }
         }
     }
@@ -1302,10 +1824,10 @@ class ConstructionManager {
     }
     
     placeTowerNear(room, spawnPos) {
-        // Place tower 3-4 tiles from spawn in various directions
+        // Place tower 3-4 tiles from spawn in various directions (for defense)
         const offsets = [
-            {x: 3, y: 0}, {x: -3, y: 0}, {x: 0, y: 3}, {x: 0, y: -3},
-            {x: 3, y: 3}, {x: 3, y: -3}, {x: -3, y: 3}, {x: -3, y: -3}
+            {x: 4, y: 0}, {x: -4, y: 0}, {x: 0, y: 4}, {x: 0, y: -4},
+            {x: 4, y: 4}, {x: 4, y: -4}, {x: -4, y: 4}, {x: -4, y: -4}
         ];
         
         for (const offset of offsets) {
@@ -1327,6 +1849,119 @@ class ConstructionManager {
                 }
             }
         }
+    }
+    
+    buildRamparts(room) {
+        // Build ramparts around important structures (spawn, controller, towers)
+        const spawn = room.find(FIND_MY_SPAWNS)[0];
+        if (!spawn) return;
+        
+        // Get positions to protect
+        const protectPositions = [spawn.pos];
+        
+        // Add controller position
+        if (room.controller) {
+            protectPositions.push(room.controller.pos);
+        }
+        
+        // Add tower positions
+        const towers = room.find(FIND_MY_STRUCTURES, {
+            filter: { structureType: STRUCTURE_TOWER }
+        });
+        towers.forEach(tower => protectPositions.push(tower.pos));
+        
+        // Build ramparts around each protected position
+        for (const pos of protectPositions) {
+            // Build a 3x3 area of ramparts around important structures
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    // Skip the center position (structure is there)
+                    if (dx === 0 && dy === 0) continue;
+                    
+                    const x = pos.x + dx;
+                    const y = pos.y + dy;
+                    
+                    if (x >= 1 && x <= 48 && y >= 1 && y <= 48) {
+                        const rampartPos = new RoomPosition(x, y, room.name);
+                        const terrain = rampartPos.lookFor(LOOK_TERRAIN);
+                        
+                        if (terrain[0] !== 'wall') {
+                            const structures = rampartPos.lookFor(LOOK_STRUCTURES);
+                            const hasRampart = structures.some(s => 
+                                s.structureType === STRUCTURE_RAMPART
+                            );
+                            const sites = rampartPos.lookFor(LOOK_CONSTRUCTION_SITES);
+                            const hasConstruction = sites.some(s => 
+                                s.structureType === STRUCTURE_RAMPART
+                            );
+                            
+                            if (!hasRampart && !hasConstruction) {
+                                rampartPos.createConstructionSite(STRUCTURE_RAMPART);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    buildWalls(room) {
+        // Build walls at room exits to create chokepoints
+        const exits = [
+            FIND_EXIT_TOP,
+            FIND_EXIT_RIGHT,
+            FIND_EXIT_BOTTOM,
+            FIND_EXIT_LEFT
+        ];
+        
+        for (const exitDir of exits) {
+            const exitPositions = room.find(exitDir);
+            if (exitPositions.length === 0) continue;
+            
+            // Build walls at the first few positions of each exit
+            // This creates natural chokepoints while allowing controlled entry
+            const positionsToBlock = exitPositions.slice(0, Math.min(3, exitPositions.length));
+            
+            for (const pos of positionsToBlock) {
+                // Check if position is near any important structure
+                const nearImportant = this.isNearImportantStructure(room, pos);
+                
+                if (!nearImportant) {
+                    const terrain = pos.lookFor(LOOK_TERRAIN);
+                    if (terrain[0] !== 'wall') {
+                        const structures = pos.lookFor(LOOK_STRUCTURES);
+                        const hasWall = structures.some(s => 
+                            s.structureType === STRUCTURE_WALL
+                        );
+                        const hasRampart = structures.some(s => 
+                            s.structureType === STRUCTURE_RAMPART
+                        );
+                        const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+                        const hasConstruction = sites.length > 0;
+                        
+                        if (!hasWall && !hasRampart && !hasConstruction) {
+                            pos.createConstructionSite(STRUCTURE_WALL);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    isNearImportantStructure(room, pos) {
+        // Check if position is near spawn, controller, or storage
+        const importantStructures = room.find(FIND_MY_STRUCTURES, {
+            filter: s => [STRUCTURE_SPAWN, STRUCTURE_CONTROLLER, STRUCTURE_STORAGE].includes(s.structureType)
+        });
+        
+        for (const structure of importantStructures) {
+            if (pos.getRangeTo(structure) <= 5) {
+                return true;
+            }
+        }
+        return false;
     }
     
     buildStorage(room) {

@@ -2,7 +2,12 @@
 
 /**
  * ConstructionManager - Plans and initiates construction of room structures
- * Priorities: Roads for efficiency, Extensions for bigger creeps, Towers/Storage
+ * Priorities:
+ * 1. Roads for efficiency
+ * 2. Extensions for bigger creeps
+ * 3. Towers for defense
+ * 4. Ramparts/Walls for base defense
+ * 5. Storage
  */
 class ConstructionManager {
     run(room) {
@@ -19,7 +24,8 @@ class ConstructionManager {
         if (!Memory.rooms[room.name].construction) {
             Memory.rooms[room.name].construction = {
                 roadsPlanned: false,
-                lastRoadBuild: 0
+                lastRoadBuild: 0,
+                defensePlanned: false
             };
         }
         
@@ -36,6 +42,11 @@ class ConstructionManager {
         
         if (rcl >= 4) {
             this.buildStorage(room);
+            this.buildRamparts(room); // Build ramparts around spawn
+        }
+        
+        if (rcl >= 5) {
+            this.buildWalls(room); // Build walls for outer defense
         }
     }
     
@@ -63,6 +74,39 @@ class ConstructionManager {
         if (room.controller) {
             for (const source of sources) {
                 this.buildRoad(room, source.pos, room.controller.pos);
+            }
+        }
+        
+        // Priority 5: Roads around important structures for defense mobility
+        this.buildRoadsAroundStructures(room, spawn.pos);
+    }
+    
+    buildRoadsAroundStructures(room, spawnPos) {
+        // Build roads in a defensive grid around spawn
+        const offsets = [
+            {x: -2, y: -2}, {x: 0, y: -2}, {x: 2, y: -2},
+            {x: -2, y: 0},                 {x: 2, y: 0},
+            {x: -2, y: 2},  {x: 0, y: 2},  {x: 2, y: 2}
+        ];
+        
+        for (const offset of offsets) {
+            const x = spawnPos.x + offset.x;
+            const y = spawnPos.y + offset.y;
+            
+            if (x > 0 && x < 49 && y > 0 && y < 49) {
+                const pos = new RoomPosition(x, y, room.name);
+                const terrain = pos.lookFor(LOOK_TERRAIN);
+                
+                if (terrain[0] !== 'wall') {
+                    const structures = pos.lookFor(LOOK_STRUCTURES);
+                    const hasRoad = structures.some(s => s.structureType === STRUCTURE_ROAD);
+                    const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+                    
+                    if (!hasRoad && sites.length === 0) {
+                        pos.createConstructionSite(STRUCTURE_ROAD);
+                        return;
+                    }
+                }
             }
         }
     }
@@ -146,10 +190,10 @@ class ConstructionManager {
     }
     
     placeTowerNear(room, spawnPos) {
-        // Place tower 3-4 tiles from spawn in various directions
+        // Place tower 3-4 tiles from spawn in various directions (for defense)
         const offsets = [
-            {x: 3, y: 0}, {x: -3, y: 0}, {x: 0, y: 3}, {x: 0, y: -3},
-            {x: 3, y: 3}, {x: 3, y: -3}, {x: -3, y: 3}, {x: -3, y: -3}
+            {x: 4, y: 0}, {x: -4, y: 0}, {x: 0, y: 4}, {x: 0, y: -4},
+            {x: 4, y: 4}, {x: 4, y: -4}, {x: -4, y: 4}, {x: -4, y: -4}
         ];
         
         for (const offset of offsets) {
@@ -171,6 +215,119 @@ class ConstructionManager {
                 }
             }
         }
+    }
+    
+    buildRamparts(room) {
+        // Build ramparts around important structures (spawn, controller, towers)
+        const spawn = room.find(FIND_MY_SPAWNS)[0];
+        if (!spawn) return;
+        
+        // Get positions to protect
+        const protectPositions = [spawn.pos];
+        
+        // Add controller position
+        if (room.controller) {
+            protectPositions.push(room.controller.pos);
+        }
+        
+        // Add tower positions
+        const towers = room.find(FIND_MY_STRUCTURES, {
+            filter: { structureType: STRUCTURE_TOWER }
+        });
+        towers.forEach(tower => protectPositions.push(tower.pos));
+        
+        // Build ramparts around each protected position
+        for (const pos of protectPositions) {
+            // Build a 3x3 area of ramparts around important structures
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    // Skip the center position (structure is there)
+                    if (dx === 0 && dy === 0) continue;
+                    
+                    const x = pos.x + dx;
+                    const y = pos.y + dy;
+                    
+                    if (x >= 1 && x <= 48 && y >= 1 && y <= 48) {
+                        const rampartPos = new RoomPosition(x, y, room.name);
+                        const terrain = rampartPos.lookFor(LOOK_TERRAIN);
+                        
+                        if (terrain[0] !== 'wall') {
+                            const structures = rampartPos.lookFor(LOOK_STRUCTURES);
+                            const hasRampart = structures.some(s => 
+                                s.structureType === STRUCTURE_RAMPART
+                            );
+                            const sites = rampartPos.lookFor(LOOK_CONSTRUCTION_SITES);
+                            const hasConstruction = sites.some(s => 
+                                s.structureType === STRUCTURE_RAMPART
+                            );
+                            
+                            if (!hasRampart && !hasConstruction) {
+                                rampartPos.createConstructionSite(STRUCTURE_RAMPART);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    buildWalls(room) {
+        // Build walls at room exits to create chokepoints
+        const exits = [
+            FIND_EXIT_TOP,
+            FIND_EXIT_RIGHT,
+            FIND_EXIT_BOTTOM,
+            FIND_EXIT_LEFT
+        ];
+        
+        for (const exitDir of exits) {
+            const exitPositions = room.find(exitDir);
+            if (exitPositions.length === 0) continue;
+            
+            // Build walls at the first few positions of each exit
+            // This creates natural chokepoints while allowing controlled entry
+            const positionsToBlock = exitPositions.slice(0, Math.min(3, exitPositions.length));
+            
+            for (const pos of positionsToBlock) {
+                // Check if position is near any important structure
+                const nearImportant = this.isNearImportantStructure(room, pos);
+                
+                if (!nearImportant) {
+                    const terrain = pos.lookFor(LOOK_TERRAIN);
+                    if (terrain[0] !== 'wall') {
+                        const structures = pos.lookFor(LOOK_STRUCTURES);
+                        const hasWall = structures.some(s => 
+                            s.structureType === STRUCTURE_WALL
+                        );
+                        const hasRampart = structures.some(s => 
+                            s.structureType === STRUCTURE_RAMPART
+                        );
+                        const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+                        const hasConstruction = sites.length > 0;
+                        
+                        if (!hasWall && !hasRampart && !hasConstruction) {
+                            pos.createConstructionSite(STRUCTURE_WALL);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    isNearImportantStructure(room, pos) {
+        // Check if position is near spawn, controller, or storage
+        const importantStructures = room.find(FIND_MY_STRUCTURES, {
+            filter: s => [STRUCTURE_SPAWN, STRUCTURE_CONTROLLER, STRUCTURE_STORAGE].includes(s.structureType)
+        });
+        
+        for (const structure of importantStructures) {
+            if (pos.getRangeTo(structure) <= 5) {
+                return true;
+            }
+        }
+        return false;
     }
     
     buildStorage(room) {

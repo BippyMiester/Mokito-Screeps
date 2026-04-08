@@ -8,6 +8,20 @@
  */
 class Repairer {
     run(creep) {
+        // Check if a harvester requested us to move
+        if (creep.memory.moveRequest) {
+            const timeSinceRequest = Game.time - creep.memory.moveRequest.time;
+            if (timeSinceRequest < 5) {
+                // Move away from the harvester
+                this.moveAway(creep, creep.memory.moveRequest.fromX, creep.memory.moveRequest.fromY);
+                creep.say('🚶 moving');
+                return;
+            } else {
+                // Request expired
+                delete creep.memory.moveRequest;
+            }
+        }
+        
         // State: repairing or collecting
         if (creep.memory.repairing && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.repairing = false;
@@ -22,6 +36,64 @@ class Repairer {
             this.repair(creep);
         } else {
             this.collectEnergy(creep);
+        }
+    }
+    
+    /**
+     * Move away from a position (called when harvester needs the spot)
+     */
+    moveAway(creep, fromX, fromY) {
+        // Calculate direction away from the position
+        const dx = creep.pos.x - fromX;
+        const dy = creep.pos.y - fromY;
+        
+        // Normalize to -1, 0, or 1
+        const dirX = dx > 0 ? 1 : dx < 0 ? -1 : 0;
+        const dirY = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+        
+        // Try to move in the opposite direction
+        const targetX = creep.pos.x + dirX;
+        const targetY = creep.pos.y + dirY;
+        
+        if (targetX >= 0 && targetX <= 49 && targetY >= 0 && targetY <= 49) {
+            const pos = new RoomPosition(targetX, targetY, creep.room.name);
+            const terrain = pos.lookFor(LOOK_TERRAIN);
+            
+            if (terrain[0] !== 'wall') {
+                const structures = pos.lookFor(LOOK_STRUCTURES);
+                const creeps = pos.lookFor(LOOK_CREEPS);
+                
+                if (structures.length === 0 && creeps.length === 0) {
+                    creep.moveTo(pos);
+                    return;
+                }
+            }
+        }
+        
+        // If can't move away directly, try random adjacent position
+        const directions = [
+            {x: 0, y: -1}, {x: 1, y: -1}, {x: 1, y: 0}, {x: 1, y: 1},
+            {x: 0, y: 1}, {x: -1, y: 1}, {x: -1, y: 0}, {x: -1, y: -1}
+        ];
+        
+        for (const dir of directions) {
+            const newX = creep.pos.x + dir.x;
+            const newY = creep.pos.y + dir.y;
+            
+            if (newX >= 0 && newX <= 49 && newY >= 0 && newY <= 49) {
+                const pos = new RoomPosition(newX, newY, creep.room.name);
+                const terrain = pos.lookFor(LOOK_TERRAIN);
+                
+                if (terrain[0] !== 'wall') {
+                    const structures = pos.lookFor(LOOK_STRUCTURES);
+                    const creeps = pos.lookFor(LOOK_CREEPS);
+                    
+                    if (structures.length === 0 && creeps.length === 0) {
+                        creep.moveTo(pos);
+                        return;
+                    }
+                }
+            }
         }
     }
 

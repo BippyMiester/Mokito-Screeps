@@ -2,7 +2,7 @@
 
 // ============================================
 // Mokito Bot - Combined Build
-// Built: 2026-04-08T10:30:23.701Z
+// Built: 2026-04-08T10:33:14.610Z
 // ============================================
 
 
@@ -1557,16 +1557,19 @@ class SpawnManager {
 
         // PHASE 4: Builders and Repairers
         // Only spawn after harvesters, runners, and upgraders are complete
-        // Builders spawn first, then repairers in 1:2 ratio
-        // Max: 3 builders, 4 repairers
+        // New ratios: Builders:Upgraders = 1:1, Repairers = (Builders+Upgraders)/2
         const maxBuilders = 3;
-        const maxRepairers = 4;
+        const maxUpgraders = harvesters.length; // 1:1 with harvesters
         
         // Check for construction sites
         const sites = room.find(FIND_CONSTRUCTION_SITES);
         
+        // Calculate desired builders (1:1 with upgraders, up to max)
+        const desiredBuilders = Math.min(upgraders.length, maxBuilders);
+        
         // Spawn builder first (priority before repairers)
-        if (builders.length < maxBuilders && sites.length > 0) {
+        // Maintain 1:1 ratio with upgraders
+        if (builders.length < desiredBuilders && sites.length > 0) {
             const bodyCost = this.getBuilderCost(energyCapacity);
             if (energyAvailable >= bodyCost) {
                 this.spawnBuilder(spawn, energyCapacity);
@@ -1574,17 +1577,17 @@ class SpawnManager {
             }
         }
         
-        // Spawn repairer after builders are at capacity or no sites
-        // Maintain 1:2 ratio (2 repairers per 1 builder), max 4 repairers
-        if (repairers.length < maxRepairers) {
-            const desiredRepairers = Math.min(builders.length * 2, maxRepairers);
-            if (repairers.length < desiredRepairers || repairers.length === 0) {
-                const needsRepair = this.needsRepair(room);
-                if (needsRepair || repairers.length === 0) {
-                    const bodyCost = this.getRepairerCost(energyCapacity);
-                    if (energyAvailable >= bodyCost) {
-                        this.spawnRepairer(spawn, energyCapacity);
-                    }
+        // Spawn repairers based on (builders + upgraders) / 2 formula
+        // This ensures repairers scale with our building/upgrading workforce
+        const desiredRepairers = Math.ceil((builders.length + upgraders.length) / 2);
+        const maxRepairers = 4;
+        
+        if (repairers.length < desiredRepairers && repairers.length < maxRepairers) {
+            const needsRepair = this.needsRepair(room);
+            if (needsRepair || repairers.length === 0) {
+                const bodyCost = this.getRepairerCost(energyCapacity);
+                if (energyAvailable >= bodyCost) {
+                    this.spawnRepairer(spawn, energyCapacity);
                 }
             }
         }
@@ -1945,30 +1948,35 @@ class SpawnManager {
         }
 
         // PHASE 4: Builders and Repairers
+        // New ratios: Builders:Upgraders = 1:1, Repairers = (Builders+Upgraders)/2
         const maxBuilders = 3;
-        const maxRepairers = 4;
         const sites = room.find(FIND_CONSTRUCTION_SITES);
         
+        // Calculate desired builders (1:1 with upgraders)
+        const desiredBuilders = Math.min(upgraders.length, maxBuilders);
+        
         // Check if builder needed (builders come before repairers)
-        if (builders.length < maxBuilders && sites.length > 0) {
+        if (builders.length < desiredBuilders && sites.length > 0) {
             priorities.push({
                 role: 'builder',
                 emoji: '🔨',
-                reason: builders.length + '/' + maxBuilders + ' builders, ' + sites.length + ' sites',
+                reason: builders.length + '/' + desiredBuilders + ' builders (1:1 with upgraders), ' + sites.length + ' sites',
                 priority: 1
             });
             if (priorities.length >= 2) return priorities;
         }
         
-        // Check if repairer needed (repairers come after builders, maintain 1:2 ratio)
+        // Check if repairer needed (repairers = (builders + upgraders) / 2)
         const needsRepair = this.needsRepair(room);
-        const desiredRepairers = Math.min(builders.length * 2, maxRepairers);
-        if (repairers.length < maxRepairers && (needsRepair || repairers.length === 0)) {
-            if (repairers.length < desiredRepairers || repairers.length === 0) {
+        const desiredRepairers = Math.ceil((builders.length + upgraders.length) / 2);
+        const maxRepairers = 4;
+        
+        if (repairers.length < desiredRepairers && repairers.length < maxRepairers) {
+            if (needsRepair || repairers.length === 0) {
                 priorities.push({
                     role: 'repairer',
                     emoji: '🔧',
-                    reason: repairers.length + '/' + desiredRepairers + ' repairers (1:2 ratio)',
+                    reason: repairers.length + '/' + desiredRepairers + ' repairers ((B+U)/2)',
                     priority: priorities.length === 0 ? 1 : 2
                 });
                 if (priorities.length >= 2) return priorities;

@@ -33,10 +33,15 @@ class Builder {
         });
 
         if (droppedEnergy) {
-            if (creep.pickup(droppedEnergy) === ERR_NOT_IN_RANGE) {
+            const result = creep.pickup(droppedEnergy);
+            if (result === ERR_NOT_IN_RANGE) {
                 creep.moveTo(droppedEnergy, {
                     visualizePathStyle: { stroke: '#ffaa00' }
                 });
+            } else if (result === OK && creep.store.getFreeCapacity() === 0) {
+                // Successfully picked up energy and is full
+                creep.memory.building = true;
+                creep.say('🔨 build');
             }
             return;
         }
@@ -49,8 +54,12 @@ class Builder {
         });
 
         if (storage) {
-            if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+            const result = creep.withdraw(storage, RESOURCE_ENERGY);
+            if (result === ERR_NOT_IN_RANGE) {
                 creep.moveTo(storage);
+            } else if (result === OK && creep.store.getFreeCapacity() === 0) {
+                creep.memory.building = true;
+                creep.say('🔨 build');
             }
             return;
         }
@@ -63,8 +72,10 @@ class Builder {
                 creep.moveTo(source, {
                     visualizePathStyle: { stroke: '#ffaa00' }
                 });
+            } else if (creep.store.getFreeCapacity() === 0) {
+                creep.memory.building = true;
+                creep.say('🔨 build');
             }
-            creep.say('⛏️ mine');
             return;
         }
 

@@ -136,33 +136,34 @@ class SpawnManager {
 
         // PHASE 4: Builders and Repairers
         // Only spawn after harvesters, runners, and upgraders are complete
-        // Ratio: 1 builder : 2 repairers
+        // Builders spawn first, then repairers in 1:2 ratio
         // Max: 3 builders, 4 repairers
         const maxBuilders = 3;
         const maxRepairers = 4;
         
-        // Check current ratio
-        const idealBuilders = Math.ceil((builders.length + repairers.length) / 3);
+        // Check for construction sites
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
         
-        // Spawn builder if needed and ratio allows
-        if (builders.length < maxBuilders && builders.length < idealBuilders) {
-            const sites = room.find(FIND_CONSTRUCTION_SITES);
-            if (sites.length > 0) {
-                const bodyCost = this.getBuilderCost(energyCapacity);
-                if (energyAvailable >= bodyCost) {
-                    this.spawnBuilder(spawn, energyCapacity);
-                }
+        // Spawn builder first (priority before repairers)
+        if (builders.length < maxBuilders && sites.length > 0) {
+            const bodyCost = this.getBuilderCost(energyCapacity);
+            if (energyAvailable >= bodyCost) {
+                this.spawnBuilder(spawn, energyCapacity);
+                return;
             }
-            return;
         }
         
-        // Spawn repairer if needed
-        if (repairers.length < maxRepairers && repairers.length < builders.length * 2) {
-            const needsRepair = this.needsRepair(room);
-            if (needsRepair || repairers.length === 0) {
-                const bodyCost = this.getRepairerCost(energyCapacity);
-                if (energyAvailable >= bodyCost) {
-                    this.spawnRepairer(spawn, energyCapacity);
+        // Spawn repairer after builders are at capacity or no sites
+        // Maintain 1:2 ratio (2 repairers per 1 builder), max 4 repairers
+        if (repairers.length < maxRepairers) {
+            const desiredRepairers = Math.min(builders.length * 2, maxRepairers);
+            if (repairers.length < desiredRepairers || repairers.length === 0) {
+                const needsRepair = this.needsRepair(room);
+                if (needsRepair || repairers.length === 0) {
+                    const bodyCost = this.getRepairerCost(energyCapacity);
+                    if (energyAvailable >= bodyCost) {
+                        this.spawnRepairer(spawn, energyCapacity);
+                    }
                 }
             }
         }
@@ -525,11 +526,10 @@ class SpawnManager {
         // PHASE 4: Builders and Repairers
         const maxBuilders = 3;
         const maxRepairers = 4;
-        const idealBuilders = Math.ceil((builders.length + repairers.length) / 3);
         const sites = room.find(FIND_CONSTRUCTION_SITES);
         
-        // Check if builder needed
-        if (builders.length < maxBuilders && builders.length < idealBuilders && sites.length > 0) {
+        // Check if builder needed (builders come before repairers)
+        if (builders.length < maxBuilders && sites.length > 0) {
             priorities.push({
                 role: 'builder',
                 emoji: '🔨',
@@ -539,14 +539,15 @@ class SpawnManager {
             if (priorities.length >= 2) return priorities;
         }
         
-        // Check if repairer needed
+        // Check if repairer needed (repairers come after builders, maintain 1:2 ratio)
         const needsRepair = this.needsRepair(room);
+        const desiredRepairers = Math.min(builders.length * 2, maxRepairers);
         if (repairers.length < maxRepairers && (needsRepair || repairers.length === 0)) {
-            if (repairers.length < builders.length * 2 || repairers.length === 0) {
+            if (repairers.length < desiredRepairers || repairers.length === 0) {
                 priorities.push({
                     role: 'repairer',
                     emoji: '🔧',
-                    reason: repairers.length + '/' + maxRepairers + ' repairers',
+                    reason: repairers.length + '/' + desiredRepairers + ' repairers (1:2 ratio)',
                     priority: priorities.length === 0 ? 1 : 2
                 });
                 if (priorities.length >= 2) return priorities;

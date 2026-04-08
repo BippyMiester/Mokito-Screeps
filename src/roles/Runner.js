@@ -34,6 +34,12 @@ class Runner {
                 creep.moveTo(droppedEnergy, {
                     visualizePathStyle: { stroke: '#ffaa00' }
                 });
+            } else {
+                // Successfully picked up, check if full
+                if (creep.store.getFreeCapacity() === 0) {
+                    creep.memory.delivering = true;
+                    creep.say('📦 deliver');
+                }
             }
             return;
         }
@@ -48,6 +54,11 @@ class Runner {
                 creep.moveTo(anyDroppedEnergy, {
                     visualizePathStyle: { stroke: '#ffaa00' }
                 });
+            } else {
+                if (creep.store.getFreeCapacity() === 0) {
+                    creep.memory.delivering = true;
+                    creep.say('📦 deliver');
+                }
             }
             return;
         }
@@ -62,6 +73,11 @@ class Runner {
         if (storage) {
             if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(storage);
+            } else {
+                if (creep.store.getFreeCapacity() === 0) {
+                    creep.memory.delivering = true;
+                    creep.say('📦 deliver');
+                }
             }
             return;
         }
@@ -93,62 +109,88 @@ class Runner {
     }
 
     deliverEnergy(creep) {
-        // Priority 1: Spawn (if not full)
+        // Get all possible delivery targets and sort by priority
+        const targets = [];
+        
+        // Priority 1: Spawn
         const spawn = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
             filter: (s) => s.structureType === STRUCTURE_SPAWN &&
                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
         });
+        if (spawn) targets.push({ type: 'spawn', obj: spawn });
         
-        if (spawn) {
-            const result = creep.transfer(spawn, RESOURCE_ENERGY);
-            if (result === ERR_NOT_IN_RANGE) {
-                creep.moveTo(spawn, {
-                    visualizePathStyle: { stroke: '#ffffff' }
-                });
-            } else if (result === ERR_FULL) {
-                // Spawn full, try extensions
-                this.deliverToExtensions(creep);
-            }
-            return;
-        }
-
         // Priority 2: Extensions
-        this.deliverToExtensions(creep);
-    }
-
-    deliverToExtensions(creep) {
-        const extension = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
+        const extensions = creep.room.find(FIND_MY_STRUCTURES, {
             filter: (s) => s.structureType === STRUCTURE_EXTENSION &&
                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
         });
-
-        if (extension) {
-            if (creep.transfer(extension, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(extension, {
-                    visualizePathStyle: { stroke: '#ffffff' }
-                });
+        if (extensions.length > 0) {
+            // Find closest extension
+            const closestExtension = creep.pos.findClosestByPath(extensions);
+            if (closestExtension) {
+                targets.push({ type: 'extension', obj: closestExtension });
             }
-            return;
         }
-
-        // Priority 3: Towers (if they need energy)
-        const tower = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
+        
+        // Priority 3: Towers
+        const towers = creep.room.find(FIND_MY_STRUCTURES, {
             filter: (s) => s.structureType === STRUCTURE_TOWER &&
                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 100
         });
-
-        if (tower) {
-            if (creep.transfer(tower, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(tower);
+        if (towers.length > 0) {
+            const closestTower = creep.pos.findClosestByPath(towers);
+            if (closestTower) {
+                targets.push({ type: 'tower', obj: closestTower });
             }
-            return;
         }
-
-        // If everything is full, wait near spawn
-        const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
-        if (spawn && !creep.pos.inRangeTo(spawn, 3)) {
-            creep.moveTo(spawn, { range: 3 });
-            creep.say('⏳ idle');
+        
+        // Try to deliver to each target in order
+        for (const target of targets) {
+            const result = creep.transfer(target.obj, RESOURCE_ENERGY);
+            
+            if (result === OK) {
+                // Successfully transferred
+                if (creep.store[RESOURCE_ENERGY] === 0) {
+                    creep.memory.delivering = false;
+                    creep.say('🔍 collect');
+                }
+                return;
+            } else if (result === ERR_NOT_IN_RANGE) {
+                creep.moveTo(target.obj, {
+                    visualizePathStyle: { stroke: '#ffffff' }
+                });
+                return;
+            } else if (result === ERR_FULL) {
+                // Target is full, continue to next target
+                continue;
+            }
+            // Other errors - try next target
+        }
+        
+        // If all targets are full or none available
+        // Drop energy so we can collect more, or wait near spawn
+        if (creep.store[RESOURCE_ENERGY] > 0) {
+            // Find spawn to drop near
+            const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
+            if (spawn) {
+                if (!creep.pos.inRangeTo(spawn, 2)) {
+                    creep.moveTo(spawn, { range: 2 });
+                } else {
+                    // Near spawn - drop energy so we can keep collecting
+                    creep.drop(RESOURCE_ENERGY);
+                    creep.memory.delivering = false;
+                    creep.say('💧 drop');
+                }
+            } else {
+                // No spawn? Just drop here
+                creep.drop(RESOURCE_ENERGY);
+                creep.memory.delivering = false;
+                creep.say('💧 drop');
+            }
+        } else {
+            // No energy to deliver, go collect
+            creep.memory.delivering = false;
+            creep.say('🔍 collect');
         }
     }
 }

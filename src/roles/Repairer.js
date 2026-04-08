@@ -31,8 +31,12 @@ class Repairer {
         });
 
         if (droppedEnergy) {
-            if (creep.pickup(droppedEnergy) === ERR_NOT_IN_RANGE) {
+            const result = creep.pickup(droppedEnergy);
+            if (result === ERR_NOT_IN_RANGE) {
                 creep.moveTo(droppedEnergy);
+            } else if (result === OK && creep.store.getFreeCapacity() === 0) {
+                creep.memory.repairing = true;
+                creep.say('🔧 repair');
             }
             return;
         }
@@ -45,8 +49,12 @@ class Repairer {
         });
 
         if (storage) {
-            if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+            const result = creep.withdraw(storage, RESOURCE_ENERGY);
+            if (result === ERR_NOT_IN_RANGE) {
                 creep.moveTo(storage);
+            } else if (result === OK && creep.store.getFreeCapacity() === 0) {
+                creep.memory.repairing = true;
+                creep.say('🔧 repair');
             }
             return;
         }
@@ -57,8 +65,10 @@ class Repairer {
         if (source) {
             if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(source);
+            } else if (creep.store.getFreeCapacity() === 0) {
+                creep.memory.repairing = true;
+                creep.say('🔧 repair');
             }
-            creep.say('⛏️ mine');
             return;
         }
 

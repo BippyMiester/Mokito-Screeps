@@ -2,7 +2,7 @@
 
 // ============================================
 // Mokito Bot - Combined Build
-// Built: 2026-04-08T10:23:58.248Z
+// Built: 2026-04-08T10:26:45.704Z
 // ============================================
 
 
@@ -368,6 +368,12 @@ class Runner {
                 creep.moveTo(droppedEnergy, {
                     visualizePathStyle: { stroke: '#ffaa00' }
                 });
+            } else {
+                // Successfully picked up, check if full
+                if (creep.store.getFreeCapacity() === 0) {
+                    creep.memory.delivering = true;
+                    creep.say('📦 deliver');
+                }
             }
             return;
         }
@@ -382,6 +388,11 @@ class Runner {
                 creep.moveTo(anyDroppedEnergy, {
                     visualizePathStyle: { stroke: '#ffaa00' }
                 });
+            } else {
+                if (creep.store.getFreeCapacity() === 0) {
+                    creep.memory.delivering = true;
+                    creep.say('📦 deliver');
+                }
             }
             return;
         }
@@ -396,6 +407,11 @@ class Runner {
         if (storage) {
             if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(storage);
+            } else {
+                if (creep.store.getFreeCapacity() === 0) {
+                    creep.memory.delivering = true;
+                    creep.say('📦 deliver');
+                }
             }
             return;
         }
@@ -427,62 +443,88 @@ class Runner {
     }
 
     deliverEnergy(creep) {
-        // Priority 1: Spawn (if not full)
+        // Get all possible delivery targets and sort by priority
+        const targets = [];
+        
+        // Priority 1: Spawn
         const spawn = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
             filter: (s) => s.structureType === STRUCTURE_SPAWN &&
                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
         });
+        if (spawn) targets.push({ type: 'spawn', obj: spawn });
         
-        if (spawn) {
-            const result = creep.transfer(spawn, RESOURCE_ENERGY);
-            if (result === ERR_NOT_IN_RANGE) {
-                creep.moveTo(spawn, {
-                    visualizePathStyle: { stroke: '#ffffff' }
-                });
-            } else if (result === ERR_FULL) {
-                // Spawn full, try extensions
-                this.deliverToExtensions(creep);
-            }
-            return;
-        }
-
         // Priority 2: Extensions
-        this.deliverToExtensions(creep);
-    }
-
-    deliverToExtensions(creep) {
-        const extension = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
+        const extensions = creep.room.find(FIND_MY_STRUCTURES, {
             filter: (s) => s.structureType === STRUCTURE_EXTENSION &&
                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
         });
-
-        if (extension) {
-            if (creep.transfer(extension, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(extension, {
-                    visualizePathStyle: { stroke: '#ffffff' }
-                });
+        if (extensions.length > 0) {
+            // Find closest extension
+            const closestExtension = creep.pos.findClosestByPath(extensions);
+            if (closestExtension) {
+                targets.push({ type: 'extension', obj: closestExtension });
             }
-            return;
         }
-
-        // Priority 3: Towers (if they need energy)
-        const tower = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
+        
+        // Priority 3: Towers
+        const towers = creep.room.find(FIND_MY_STRUCTURES, {
             filter: (s) => s.structureType === STRUCTURE_TOWER &&
                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 100
         });
-
-        if (tower) {
-            if (creep.transfer(tower, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(tower);
+        if (towers.length > 0) {
+            const closestTower = creep.pos.findClosestByPath(towers);
+            if (closestTower) {
+                targets.push({ type: 'tower', obj: closestTower });
             }
-            return;
         }
-
-        // If everything is full, wait near spawn
-        const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
-        if (spawn && !creep.pos.inRangeTo(spawn, 3)) {
-            creep.moveTo(spawn, { range: 3 });
-            creep.say('⏳ idle');
+        
+        // Try to deliver to each target in order
+        for (const target of targets) {
+            const result = creep.transfer(target.obj, RESOURCE_ENERGY);
+            
+            if (result === OK) {
+                // Successfully transferred
+                if (creep.store[RESOURCE_ENERGY] === 0) {
+                    creep.memory.delivering = false;
+                    creep.say('🔍 collect');
+                }
+                return;
+            } else if (result === ERR_NOT_IN_RANGE) {
+                creep.moveTo(target.obj, {
+                    visualizePathStyle: { stroke: '#ffffff' }
+                });
+                return;
+            } else if (result === ERR_FULL) {
+                // Target is full, continue to next target
+                continue;
+            }
+            // Other errors - try next target
+        }
+        
+        // If all targets are full or none available
+        // Drop energy so we can collect more, or wait near spawn
+        if (creep.store[RESOURCE_ENERGY] > 0) {
+            // Find spawn to drop near
+            const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
+            if (spawn) {
+                if (!creep.pos.inRangeTo(spawn, 2)) {
+                    creep.moveTo(spawn, { range: 2 });
+                } else {
+                    // Near spawn - drop energy so we can keep collecting
+                    creep.drop(RESOURCE_ENERGY);
+                    creep.memory.delivering = false;
+                    creep.say('💧 drop');
+                }
+            } else {
+                // No spawn? Just drop here
+                creep.drop(RESOURCE_ENERGY);
+                creep.memory.delivering = false;
+                creep.say('💧 drop');
+            }
+        } else {
+            // No energy to deliver, go collect
+            creep.memory.delivering = false;
+            creep.say('🔍 collect');
         }
     }
 }
@@ -614,10 +656,15 @@ class Builder {
         });
 
         if (droppedEnergy) {
-            if (creep.pickup(droppedEnergy) === ERR_NOT_IN_RANGE) {
+            const result = creep.pickup(droppedEnergy);
+            if (result === ERR_NOT_IN_RANGE) {
                 creep.moveTo(droppedEnergy, {
                     visualizePathStyle: { stroke: '#ffaa00' }
                 });
+            } else if (result === OK && creep.store.getFreeCapacity() === 0) {
+                // Successfully picked up energy and is full
+                creep.memory.building = true;
+                creep.say('🔨 build');
             }
             return;
         }
@@ -630,8 +677,12 @@ class Builder {
         });
 
         if (storage) {
-            if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+            const result = creep.withdraw(storage, RESOURCE_ENERGY);
+            if (result === ERR_NOT_IN_RANGE) {
                 creep.moveTo(storage);
+            } else if (result === OK && creep.store.getFreeCapacity() === 0) {
+                creep.memory.building = true;
+                creep.say('🔨 build');
             }
             return;
         }
@@ -644,8 +695,10 @@ class Builder {
                 creep.moveTo(source, {
                     visualizePathStyle: { stroke: '#ffaa00' }
                 });
+            } else if (creep.store.getFreeCapacity() === 0) {
+                creep.memory.building = true;
+                creep.say('🔨 build');
             }
-            creep.say('⛏️ mine');
             return;
         }
 
@@ -725,8 +778,12 @@ class Repairer {
         });
 
         if (droppedEnergy) {
-            if (creep.pickup(droppedEnergy) === ERR_NOT_IN_RANGE) {
+            const result = creep.pickup(droppedEnergy);
+            if (result === ERR_NOT_IN_RANGE) {
                 creep.moveTo(droppedEnergy);
+            } else if (result === OK && creep.store.getFreeCapacity() === 0) {
+                creep.memory.repairing = true;
+                creep.say('🔧 repair');
             }
             return;
         }
@@ -739,8 +796,12 @@ class Repairer {
         });
 
         if (storage) {
-            if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+            const result = creep.withdraw(storage, RESOURCE_ENERGY);
+            if (result === ERR_NOT_IN_RANGE) {
                 creep.moveTo(storage);
+            } else if (result === OK && creep.store.getFreeCapacity() === 0) {
+                creep.memory.repairing = true;
+                creep.say('🔧 repair');
             }
             return;
         }
@@ -751,8 +812,10 @@ class Repairer {
         if (source) {
             if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(source);
+            } else if (creep.store.getFreeCapacity() === 0) {
+                creep.memory.repairing = true;
+                creep.say('🔧 repair');
             }
-            creep.say('⛏️ mine');
             return;
         }
 
@@ -1425,33 +1488,34 @@ class SpawnManager {
 
         // PHASE 4: Builders and Repairers
         // Only spawn after harvesters, runners, and upgraders are complete
-        // Ratio: 1 builder : 2 repairers
+        // Builders spawn first, then repairers in 1:2 ratio
         // Max: 3 builders, 4 repairers
         const maxBuilders = 3;
         const maxRepairers = 4;
         
-        // Check current ratio
-        const idealBuilders = Math.ceil((builders.length + repairers.length) / 3);
+        // Check for construction sites
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
         
-        // Spawn builder if needed and ratio allows
-        if (builders.length < maxBuilders && builders.length < idealBuilders) {
-            const sites = room.find(FIND_CONSTRUCTION_SITES);
-            if (sites.length > 0) {
-                const bodyCost = this.getBuilderCost(energyCapacity);
-                if (energyAvailable >= bodyCost) {
-                    this.spawnBuilder(spawn, energyCapacity);
-                }
+        // Spawn builder first (priority before repairers)
+        if (builders.length < maxBuilders && sites.length > 0) {
+            const bodyCost = this.getBuilderCost(energyCapacity);
+            if (energyAvailable >= bodyCost) {
+                this.spawnBuilder(spawn, energyCapacity);
+                return;
             }
-            return;
         }
         
-        // Spawn repairer if needed
-        if (repairers.length < maxRepairers && repairers.length < builders.length * 2) {
-            const needsRepair = this.needsRepair(room);
-            if (needsRepair || repairers.length === 0) {
-                const bodyCost = this.getRepairerCost(energyCapacity);
-                if (energyAvailable >= bodyCost) {
-                    this.spawnRepairer(spawn, energyCapacity);
+        // Spawn repairer after builders are at capacity or no sites
+        // Maintain 1:2 ratio (2 repairers per 1 builder), max 4 repairers
+        if (repairers.length < maxRepairers) {
+            const desiredRepairers = Math.min(builders.length * 2, maxRepairers);
+            if (repairers.length < desiredRepairers || repairers.length === 0) {
+                const needsRepair = this.needsRepair(room);
+                if (needsRepair || repairers.length === 0) {
+                    const bodyCost = this.getRepairerCost(energyCapacity);
+                    if (energyAvailable >= bodyCost) {
+                        this.spawnRepairer(spawn, energyCapacity);
+                    }
                 }
             }
         }
@@ -1814,11 +1878,10 @@ class SpawnManager {
         // PHASE 4: Builders and Repairers
         const maxBuilders = 3;
         const maxRepairers = 4;
-        const idealBuilders = Math.ceil((builders.length + repairers.length) / 3);
         const sites = room.find(FIND_CONSTRUCTION_SITES);
         
-        // Check if builder needed
-        if (builders.length < maxBuilders && builders.length < idealBuilders && sites.length > 0) {
+        // Check if builder needed (builders come before repairers)
+        if (builders.length < maxBuilders && sites.length > 0) {
             priorities.push({
                 role: 'builder',
                 emoji: '🔨',
@@ -1828,14 +1891,15 @@ class SpawnManager {
             if (priorities.length >= 2) return priorities;
         }
         
-        // Check if repairer needed
+        // Check if repairer needed (repairers come after builders, maintain 1:2 ratio)
         const needsRepair = this.needsRepair(room);
+        const desiredRepairers = Math.min(builders.length * 2, maxRepairers);
         if (repairers.length < maxRepairers && (needsRepair || repairers.length === 0)) {
-            if (repairers.length < builders.length * 2 || repairers.length === 0) {
+            if (repairers.length < desiredRepairers || repairers.length === 0) {
                 priorities.push({
                     role: 'repairer',
                     emoji: '🔧',
-                    reason: repairers.length + '/' + maxRepairers + ' repairers',
+                    reason: repairers.length + '/' + desiredRepairers + ' repairers (1:2 ratio)',
                     priority: priorities.length === 0 ? 1 : 2
                 });
                 if (priorities.length >= 2) return priorities;

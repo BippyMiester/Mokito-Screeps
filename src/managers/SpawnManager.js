@@ -81,9 +81,12 @@ class SpawnManager {
         // Only skip if we're not at full energy and have enough creeps to sustain
         if (!energyFull && harvesters.length >= 2 && room.controller.level >= 2) {
             // Wait for full energy unless it's early game
-            console.log('⏳ Waiting for full energy: ' + energyAvailable + '/' + energyCapacity);
+            // Status will be shown in heartbeat
+            room.memory.waitingForEnergy = true;
             return;
         }
+        
+        room.memory.waitingForEnergy = false;
 
         // PHASE 1: Initial startup - exactly 2 harvesters, then 1 upgrader
         if (harvesters.length === 2 && upgraders.length < 1) {

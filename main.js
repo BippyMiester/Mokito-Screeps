@@ -2,7 +2,7 @@
 
 // ============================================
 // Mokito Bot - Combined Build
-// Built: 2026-04-08T10:46:09.588Z
+// Built: 2026-04-08T10:48:33.555Z
 // ============================================
 
 
@@ -2706,9 +2706,12 @@ class SpawnManager {
         // Only skip if we're not at full energy and have enough creeps to sustain
         if (!energyFull && harvesters.length >= 2 && room.controller.level >= 2) {
             // Wait for full energy unless it's early game
-            console.log('⏳ Waiting for full energy: ' + energyAvailable + '/' + energyCapacity);
+            // Status will be shown in heartbeat
+            room.memory.waitingForEnergy = true;
             return;
         }
+        
+        room.memory.waitingForEnergy = false;
 
         // PHASE 1: Initial startup - exactly 2 harvesters, then 1 upgrader
         if (harvesters.length === 2 && upgraders.length < 1) {
@@ -3675,24 +3678,44 @@ class Mokito {
                 const builders = creeps.filter(c => c.memory.role === 'builder').length;
                 const repairers = creeps.filter(c => c.memory.role === 'repairer').length;
                 const runners = creeps.filter(c => c.memory.role === 'runner').length;
+                const remoteHarvesters = creeps.filter(c => c.memory.role === 'remoteharvester').length;
+                const haulers = creeps.filter(c => c.memory.role === 'hauler').length;
+                const claimers = creeps.filter(c => c.memory.role === 'claimer').length;
                 const droppedEnergy = room.find(FIND_DROPPED_RESOURCES, {
                     filter: r => r.resourceType === RESOURCE_ENERGY
                 }).reduce((sum, r) => sum + r.amount, 0);
                 
                 // Get spawn priority info from room memory
-                let upNext = '';
+                let upNext = 'None';
                 const nextSpawns = room.memory.spawnPriority || [];
                 if (nextSpawns.length > 0) {
-                    upNext = ' | Next: ' + nextSpawns[0].emoji + ' ' + nextSpawns[0].role + ' (' + nextSpawns[0].reason + ')';
+                    upNext = nextSpawns[0].emoji + ' ' + nextSpawns[0].role;
                     if (nextSpawns.length > 1) {
                         upNext += ' → ' + nextSpawns[1].emoji + ' ' + nextSpawns[1].role;
                     }
                 }
                 
-                console.log('💓 Mokito | Creeps: H:' + harvesters + ' R:' + runners + ' U:' + upgraders + ' B:' + builders + ' Rp:' + repairers + 
-                          ' | GCL:' + Game.gcl.level + 
-                          ' | RCL:' + room.controller.level + 
-                          ' | Energy:' + droppedEnergy + upNext);
+                // Build multi-line status message
+                let status = '\n💓 ========== MOKITO HEARTBEAT ==========\n';
+                status += 'Creeps: H:' + harvesters + ' R:' + runners + ' U:' + upgraders + ' B:' + builders + ' Rp:' + repairers;
+                if (remoteHarvesters > 0 || haulers > 0 || claimers > 0) {
+                    status += ' | RH:' + remoteHarvesters + ' Ha:' + haulers + ' C:' + claimers;
+                }
+                status += '\n';
+                status += 'GCL:' + Game.gcl.level + ' | RCL:' + room.controller.level + '\n';
+                status += 'Dropped Energy: ' + droppedEnergy + '\n';
+                
+                // Check if waiting for energy
+                if (room.memory.waitingForEnergy) {
+                    const energyAvailable = room.energyAvailable;
+                    const energyCapacity = room.energyCapacityAvailable;
+                    status += '⏳ Waiting for full energy: ' + energyAvailable + '/' + energyCapacity + '\n';
+                }
+                
+                status += 'Next Spawn: ' + upNext + '\n';
+                status += '======================================\n';
+                
+                console.log(status);
             }
         }
     }

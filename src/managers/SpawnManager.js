@@ -8,11 +8,14 @@
  *   - Then spawn 1 upgrader (self-mines)
  * Phase 2 (Filling Harvesters):
  *   - Continue spawning harvesters until all source positions filled
- *   - Upgraders keep spawning (1:1 ratio with harvesters, minimum 1)
  * Phase 3 (Stationary Mode):
  *   - Once harvesters >= source positions, switch to stationary mode
- *   - Harvesters drop energy at sources
- *   - Builders/Repairers now spawn (1 builder : 2 repairers ratio, max 3 builders, 4 repairers)
+ *   - Spawn Runners to move energy from drops to spawn (1 runner per 2 harvesters)
+ *   - Then spawn Upgraders (1:1 ratio with harvesters)
+ * Phase 4 (Builders/Repairers):
+ *   - Only after harvesters, runners, and upgraders are complete
+ *   - Ratio: 1 builder : 2 repairers
+ *   - Max: 3 builders, 4 repairers
  * Emergency: 
  *   - If harvesters drop below 2, revert to Phase 1
  *   - Pause other spawning until harvesters rebuilt
@@ -32,6 +35,7 @@ class SpawnManager {
         const upgraders = creeps.filter(c => c.memory.role === 'upgrader');
         const builders = creeps.filter(c => c.memory.role === 'builder');
         const repairers = creeps.filter(c => c.memory.role === 'repairer');
+        const runners = creeps.filter(c => c.memory.role === 'runner');
 
         // Calculate needed harvesters (open positions around sources)
         const sources = room.find(FIND_SOURCES);
@@ -66,12 +70,6 @@ class SpawnManager {
         }
 
         // PHASE 1: Initial startup - exactly 2 harvesters, then 1 upgrader
-        if (harvesters.length < 2) {
-            // Should not reach here due to emergency check, but just in case
-            return;
-        }
-        
-        // We have 2+ harvesters, check if we have our first upgrader
         if (harvesters.length === 2 && upgraders.length < 1) {
             if (energyAvailable >= 200) {
                 this.spawnUpgrader(spawn, energyCapacity);
@@ -109,7 +107,19 @@ class SpawnManager {
             }
         }
 
-        // PHASE 3: Fill upgrader positions
+        // PHASE 3 (Stationary Mode): Spawn Runners first
+        // Runners move energy from dropped locations to spawn/extensions
+        // Ratio: 1 runner per 2 harvesters
+        const desiredRunners = Math.ceil(harvesters.length / 2);
+        if (runners.length < desiredRunners) {
+            const bodyCost = this.getRunnerCost(energyCapacity);
+            if (energyAvailable >= bodyCost) {
+                this.spawnRunner(spawn, energyCapacity);
+            }
+            return;
+        }
+
+        // PHASE 3 (Stationary Mode): Spawn Upgraders after Runners
         // Calculate desired upgraders: 1 per 1 harvester (1:1 ratio), minimum 1
         const desiredUpgraders = Math.max(1, harvesters.length);
         if (upgraders.length < desiredUpgraders) {
@@ -121,7 +131,7 @@ class SpawnManager {
         }
 
         // PHASE 4: Builders and Repairers
-        // Only spawn after harvesters and upgraders are complete
+        // Only spawn after harvesters, runners, and upgraders are complete
         // Ratio: 1 builder : 2 repairers
         // Max: 3 builders, 4 repairers
         const maxBuilders = 3;
@@ -218,6 +228,34 @@ class SpawnManager {
         return body;
     }
 
+    getRunnerCost(energyCapacity) {
+        // Runner body: prioritize CARRY and MOVE for transport efficiency
+        // WORK is optional for self-sufficiency if needed
+        const maxSets = Math.min(Math.floor(energyCapacity / 150), 16); // CARRY, MOVE, CARRY = 150
+        return maxSets > 0 ? maxSets * 150 : 150;
+    }
+
+    getRunnerBody(energyCapacity) {
+        const body = [];
+        // Runners need lots of CARRY and MOVE for efficient transport
+        // Maximize carry capacity while maintaining move speed
+        let remaining = energyCapacity;
+        
+        // Add CARRY, MOVE pairs
+        while (remaining >= 100 && body.length < 50 - 2) {
+            body.push(CARRY);
+            body.push(MOVE);
+            remaining -= 100;
+        }
+        
+        // If we have leftover, add more CARRY
+        if (remaining >= 50 && body.length < 50) {
+            body.push(CARRY);
+        }
+        
+        return body.length > 0 ? body : [CARRY, MOVE];
+    }
+
     getUpgraderCost(energyCapacity) {
         // Upgrader body: WORK, CARRY, MOVE repeating
         const maxSets = Math.min(Math.floor(energyCapacity / 200), 16);
@@ -288,6 +326,21 @@ class SpawnManager {
 
         if (result === OK) {
             console.log('🌱 Spawning harvester: ' + name + ' [' + body.length + ' parts]');
+        }
+        return result;
+    }
+
+    spawnRunner(spawn, energyCapacity) {
+        const body = this.getRunnerBody(energyCapacity);
+        if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
+
+        const name = 'Runner' + Game.time;
+        const result = spawn.spawnCreep(body, name, {
+            memory: { role: 'runner' }
+        });
+
+        if (result === OK) {
+            console.log('🏃 Spawning runner: ' + name + ' [' + body.length + ' parts]');
         }
         return result;
     }

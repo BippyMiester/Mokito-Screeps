@@ -17,6 +17,7 @@ console.log('');
 const buildOrder = [
     // Roles first (lowest level)
     'src/roles/Harvester.js',
+    'src/roles/Runner.js',
     'src/roles/Upgrader.js',
     'src/roles/Builder.js',
     'src/roles/Repairer.js',

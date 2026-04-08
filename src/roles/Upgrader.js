@@ -1,16 +1,16 @@
 'use strict';
 
 /**
- * Upgrader - Upgrades room controller
- * Priority: Dropped energy > Containers/Storage > Self-mining
- * NEVER takes from spawn - keeps spawn energy for creep spawning
+ * Upgrader - Mines energy and upgrades controller
+ * Priority: Self-mining (always) > Dropped energy (if available) > Containers/Storage
+ * NEVER takes from spawn - upgraders are self-sufficient
  */
 class Upgrader {
     run(creep) {
         // State management
         if (creep.memory.upgrading && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.upgrading = false;
-            creep.say('🔍 collect');
+            creep.say('⛏️ collect');
         }
         if (!creep.memory.upgrading && creep.store.getFreeCapacity() === 0) {
             creep.memory.upgrading = true;
@@ -21,13 +21,13 @@ class Upgrader {
             // Upgrade controller
             this.upgradeController(creep);
         } else {
-            // Collect dropped energy from ground
+            // Collect energy - self-mine by default, but pick up dropped if available
             this.collectEnergy(creep);
         }
     }
 
     collectEnergy(creep) {
-        // Priority 1: Dropped energy (from stationary harvesters)
+        // Priority 1: Dropped energy (bonus if available from stationary harvesters)
         const droppedEnergy = creep.pos.findClosestByPath(FIND_DROPPED_RESOURCES, {
             filter: (resource) => resource.resourceType === RESOURCE_ENERGY && resource.amount >= 20
         });
@@ -41,7 +41,7 @@ class Upgrader {
             return;
         }
 
-        // Priority 2: Containers/Storage
+        // Priority 2: Containers/Storage (if available)
         const storage = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: (s) => (s.structureType === STRUCTURE_CONTAINER ||
                            s.structureType === STRUCTURE_STORAGE) &&
@@ -55,8 +55,9 @@ class Upgrader {
             return;
         }
 
-        // Priority 3: Mine energy yourself (if stationary harvesters not available)
-        // Upgraders should NOT take from spawn - only from ground or containers
+        // Priority 3: Mine energy yourself (DEFAULT BEHAVIOR)
+        // Upgraders are self-sufficient - they mine their own energy
+        // This allows harvesters to focus on feeding the spawn for more creep production
         const source = creep.pos.findClosestByPath(FIND_SOURCES);
         if (source) {
             if (creep.harvest(source) === ERR_NOT_IN_RANGE) {

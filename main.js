@@ -2,51 +2,73 @@
 
 // ============================================
 // Mokito Bot - Combined Build
-// Built: 2026-04-08T10:03:21.606Z
+// Built: 2026-04-08T10:12:14.402Z
 // ============================================
 
 
 // --- Harvester.js ---
 /**
- * Harvester - Two-phase strategy
- * Phase 1: Deliver energy to spawn (until enough harvesters exist)
- * Phase 2: Stationary harvesting (drop energy on ground)
+ * Harvester - Two-phase strategy with global room mode tracking
+ * Phase 1: Traditional - Deliver energy to spawn (until all source positions filled)
+ * Phase 2: Stationary - Drop energy at source (only when harvesters >= positions)
+ * Emergency: Revert to traditional mode if harvesters drop below 2
  */
 class Harvester {
     run(creep) {
-        // Check if we should use stationary strategy
-        const shouldUseStationary = this.checkStationaryStrategy(creep.room);
+        // Check room's harvester mode
+        const mode = this.getRoomMode(creep.room);
         
-        if (shouldUseStationary) {
+        if (mode === 'stationary') {
             // Stationary mode: go to source position and drop energy
             this.runStationary(creep);
         } else {
-            // Traditional mode: harvest and deliver to spawn
+            // Traditional mode: harvest and deliver to spawn/extensions
             this.runTraditional(creep);
         }
     }
     
     /**
-     * Check if we have enough harvesters to switch to stationary strategy
-     * Returns true if all open positions around sources are covered
+     * Get the current mode for the room
+     * 'stationary' - When we have enough harvesters to cover all source positions
+     * 'traditional' - When harvesters are low (especially below 2) or filling up
      */
-    checkStationaryStrategy(room) {
-        const sources = room.find(FIND_SOURCES);
+    getRoomMode(room) {
+        // Check if we need to force traditional mode (emergency)
+        const harvesters = room.find(FIND_MY_CREEPS, {
+            filter: c => c.memory.role === 'harvester'
+        });
+        
+        // Emergency: If less than 2 harvesters, force traditional mode
+        if (harvesters.length < 2) {
+            if (Memory.rooms[room.name].harvesterMode === 'stationary') {
+                console.log('EMERGENCY: Harvester count dropped below 2, switching to traditional mode');
+                Memory.rooms[room.name].harvesterMode = 'traditional';
+            }
+            return 'traditional';
+        }
         
         // Count total open positions around all sources
+        const sources = room.find(FIND_SOURCES);
         let totalPositions = 0;
         for (const source of sources) {
             totalPositions += this.countOpenPositions(source);
         }
         
-        // Count current harvesters
-        const harvesters = room.find(FIND_MY_CREEPS, {
-            filter: c => c.memory.role === 'harvester'
-        });
-        
         // Switch to stationary when we have harvesters >= positions
-        // (or close to it, allow some buffer)
-        return harvesters.length >= totalPositions;
+        if (harvesters.length >= totalPositions) {
+            if (Memory.rooms[room.name].harvesterMode !== 'stationary') {
+                console.log('Switching to stationary harvesting mode');
+                Memory.rooms[room.name].harvesterMode = 'stationary';
+            }
+            return 'stationary';
+        }
+        
+        // Otherwise stay in/return to traditional mode
+        if (Memory.rooms[room.name].harvesterMode === 'stationary') {
+            console.log('Harvester count dropped, reverting to traditional mode');
+            Memory.rooms[room.name].harvesterMode = 'traditional';
+        }
+        return 'traditional';
     }
     
     /**
@@ -75,7 +97,8 @@ class Harvester {
     }
     
     /**
-     * Traditional harvester: Harvest energy and deliver to spawn
+     * Traditional harvester: Harvest energy and deliver to spawn/extensions
+     * Used when: Starting game, low harvester count, or emergency fallback
      */
     runTraditional(creep) {
         // State: harvesting or delivering
@@ -89,16 +112,17 @@ class Harvester {
         }
         
         if (creep.memory.delivering) {
-            // Deliver to spawn
+            // Deliver to spawn, extensions, or towers
             const target = this.findDeliveryTarget(creep);
             if (target) {
                 const result = creep.transfer(target, RESOURCE_ENERGY);
                 if (result === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(target);
+                    creep.moveTo(target, {
+                        visualizePathStyle: { stroke: '#ffffff' }
+                    });
                 } else if (result === ERR_FULL) {
                     // Target is full, try to find another target
                     creep.say('🚫 full');
-                    // Clear any cached target so we find a new one next tick
                 } else if (result === OK) {
                     // Transfer successful
                     if (creep.store[RESOURCE_ENERGY] === 0) {
@@ -108,15 +132,20 @@ class Harvester {
                 }
             } else {
                 // No target available - spawn/extensions are full
-                // Wait near spawn or drop energy on ground
+                // Wait near spawn or drop energy on ground so we can keep harvesting
                 const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
                 if (spawn) {
                     if (!creep.pos.inRangeTo(spawn, 3)) {
-                        creep.moveTo(spawn, { range: 3 });
+                        creep.moveTo(spawn, { 
+                            range: 3,
+                            visualizePathStyle: { stroke: '#ffaa00' }
+                        });
                     } else {
                         // Near spawn but it's full - drop energy so we can keep harvesting
-                        creep.drop(RESOURCE_ENERGY);
-                        creep.say('💧 drop');
+                        if (creep.store[RESOURCE_ENERGY] > 0) {
+                            creep.drop(RESOURCE_ENERGY);
+                            creep.say('💧 drop');
+                        }
                         creep.memory.delivering = false;
                     }
                 }
@@ -126,13 +155,30 @@ class Harvester {
             const source = Game.getObjectById(creep.memory.sourceId);
             if (source) {
                 if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(source);
+                    creep.moveTo(source, {
+                        visualizePathStyle: { stroke: '#ffaa00' }
+                    });
                 }
             } else {
                 // No source assigned, find one
                 const sources = creep.room.find(FIND_SOURCES);
                 if (sources.length > 0) {
-                    creep.memory.sourceId = sources[0].id;
+                    // Find a source with fewer harvesters
+                    let bestSource = sources[0];
+                    let minHarvesters = Infinity;
+                    
+                    for (const source of sources) {
+                        const harvestersAtSource = creep.room.find(FIND_MY_CREEPS, {
+                            filter: c => c.memory.role === 'harvester' && c.memory.sourceId === source.id
+                        });
+                        if (harvestersAtSource.length < minHarvesters) {
+                            minHarvesters = harvestersAtSource.length;
+                            bestSource = source;
+                        }
+                    }
+                    
+                    creep.memory.sourceId = bestSource.id;
+                    creep.say('📍 source');
                 }
             }
         }
@@ -140,8 +186,12 @@ class Harvester {
     
     /**
      * Stationary harvester: Go to position, harvest, and drop
+     * Used when: All source positions are covered by harvesters
      */
     runStationary(creep) {
+        // Clear delivering flag - stationary harvesters never deliver
+        creep.memory.delivering = false;
+        
         // If we don't have a position assigned yet, find one
         if (!creep.memory.harvestPos) {
             this.findPosition(creep);
@@ -158,13 +208,17 @@ class Harvester {
             // If not at position, move there
             if (!creep.pos.isEqualTo(targetPos)) {
                 creep.moveTo(targetPos, {
-                    visualizePathStyle: { stroke: '#ffaa00' }
+                    visualizePathStyle: { stroke: '#ffaa00' },
+                    range: 0
                 });
                 return;
             }
             
             // We're at our position - harvest and drop
             this.harvestAndDrop(creep);
+        } else {
+            // Couldn't find a position, fall back to traditional
+            this.runTraditional(creep);
         }
     }
     
@@ -173,6 +227,16 @@ class Harvester {
         if (!source) return;
         
         const positions = this.getOpenPositions(source);
+        
+        // Sort positions by proximity to spawn for efficiency
+        const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
+        if (spawn) {
+            positions.sort((a, b) => {
+                const distA = Math.abs(a.x - spawn.pos.x) + Math.abs(a.y - spawn.pos.y);
+                const distB = Math.abs(b.x - spawn.pos.x) + Math.abs(b.y - spawn.pos.y);
+                return distA - distB;
+            });
+        }
         
         for (const pos of positions) {
             let occupied = false;
@@ -229,11 +293,13 @@ class Harvester {
         const result = creep.harvest(source);
         
         if (result === OK) {
+            // Drop energy when full or when we have enough
             if (creep.store.getFreeCapacity() === 0) {
                 creep.drop(RESOURCE_ENERGY);
                 creep.say('💧 drop');
             }
         } else if (result === ERR_NOT_IN_RANGE) {
+            // Shouldn't happen if we're at our position, but handle it
             creep.moveTo(source);
         } else if (result === ERR_NOT_ENOUGH_RESOURCES) {
             creep.say('⏳ wait');
@@ -269,16 +335,16 @@ class Harvester {
 
 // --- Upgrader.js ---
 /**
- * Upgrader - Upgrades room controller
- * Priority: Dropped energy > Containers/Storage > Self-mining
- * NEVER takes from spawn - keeps spawn energy for creep spawning
+ * Upgrader - Mines energy and upgrades controller
+ * Priority: Self-mining (always) > Dropped energy (if available) > Containers/Storage
+ * NEVER takes from spawn - upgraders are self-sufficient
  */
 class Upgrader {
     run(creep) {
         // State management
         if (creep.memory.upgrading && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.upgrading = false;
-            creep.say('🔍 collect');
+            creep.say('⛏️ collect');
         }
         if (!creep.memory.upgrading && creep.store.getFreeCapacity() === 0) {
             creep.memory.upgrading = true;
@@ -289,13 +355,13 @@ class Upgrader {
             // Upgrade controller
             this.upgradeController(creep);
         } else {
-            // Collect dropped energy from ground
+            // Collect energy - self-mine by default, but pick up dropped if available
             this.collectEnergy(creep);
         }
     }
 
     collectEnergy(creep) {
-        // Priority 1: Dropped energy (from stationary harvesters)
+        // Priority 1: Dropped energy (bonus if available from stationary harvesters)
         const droppedEnergy = creep.pos.findClosestByPath(FIND_DROPPED_RESOURCES, {
             filter: (resource) => resource.resourceType === RESOURCE_ENERGY && resource.amount >= 20
         });
@@ -309,7 +375,7 @@ class Upgrader {
             return;
         }
 
-        // Priority 2: Containers/Storage
+        // Priority 2: Containers/Storage (if available)
         const storage = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: (s) => (s.structureType === STRUCTURE_CONTAINER ||
                            s.structureType === STRUCTURE_STORAGE) &&
@@ -323,8 +389,9 @@ class Upgrader {
             return;
         }
 
-        // Priority 3: Mine energy yourself (if stationary harvesters not available)
-        // Upgraders should NOT take from spawn - only from ground or containers
+        // Priority 3: Mine energy yourself (DEFAULT BEHAVIOR)
+        // Upgraders are self-sufficient - they mine their own energy
+        // This allows harvesters to focus on feeding the spawn for more creep production
         const source = creep.pos.findClosestByPath(FIND_SOURCES);
         if (source) {
             if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
@@ -792,6 +859,10 @@ class MemoryManager {
 }
 
 // --- ConstructionManager.js ---
+/**
+ * ConstructionManager - Plans and initiates construction of room structures
+ * Priorities: Roads for efficiency, Extensions for bigger creeps, Towers/Storage
+ */
 class ConstructionManager {
     run(room) {
         const rcl = room.controller.level;
@@ -801,7 +872,15 @@ class ConstructionManager {
         
         // Get existing construction sites count
         const sites = room.find(FIND_CONSTRUCTION_SITES);
-        if (sites.length >= 3) return; // Don't overwhelm with construction
+        if (sites.length >= 5) return; // Don't overwhelm with construction
+        
+        // Initialize room construction memory
+        if (!Memory.rooms[room.name].construction) {
+            Memory.rooms[room.name].construction = {
+                roadsPlanned: false,
+                lastRoadBuild: 0
+            };
+        }
         
         // Build based on RCL
         this.buildEssentials(room, spawn);
@@ -820,20 +899,34 @@ class ConstructionManager {
     }
     
     buildEssentials(room, spawn) {
-        // Build roads to sources
         const sources = room.find(FIND_SOURCES);
+        
+        // Priority 1: Roads from spawn to sources (for harvesters)
         for (const source of sources) {
             this.buildRoad(room, spawn.pos, source.pos);
         }
         
-        // Build road to controller
+        // Priority 2: Road from spawn to controller (for upgraders)
         if (room.controller) {
             this.buildRoad(room, spawn.pos, room.controller.pos);
+        }
+        
+        // Priority 3: Roads between sources (for efficiency)
+        if (sources.length > 1) {
+            for (let i = 0; i < sources.length - 1; i++) {
+                this.buildRoad(room, sources[i].pos, sources[i + 1].pos);
+            }
+        }
+        
+        // Priority 4: Roads from sources to controller
+        if (room.controller) {
+            for (const source of sources) {
+                this.buildRoad(room, source.pos, room.controller.pos);
+            }
         }
     }
     
     buildExtensions(room) {
-        // Build extensions around spawn
         const spawn = room.find(FIND_MY_SPAWNS)[0];
         if (!spawn) return;
         
@@ -845,8 +938,55 @@ class ConstructionManager {
         const maxExtensions = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.controller.level] || 0;
         
         if (extensions.length < maxExtensions) {
-            // Place extension near spawn
-            this.placeStructureNear(room, spawn.pos, STRUCTURE_EXTENSION, 2);
+            // Place extensions in a pattern around spawn (better than random placement)
+            this.placeExtensionPattern(room, spawn.pos, extensions.length, maxExtensions);
+        }
+    }
+    
+    /**
+     * Place extensions in a diamond pattern around spawn for optimal pathing
+     */
+    placeExtensionPattern(room, spawnPos, currentCount, maxCount) {
+        // Diamond pattern offsets (prioritize closer to spawn)
+        const pattern = [
+            {x: 0, y: -2}, {x: 1, y: -1}, {x: 2, y: 0}, {x: 1, y: 1},
+            {x: 0, y: 2}, {x: -1, y: 1}, {x: -2, y: 0}, {x: -1, y: -1},
+            // Second ring
+            {x: 0, y: -3}, {x: 1, y: -2}, {x: 2, y: -2}, {x: 3, y: -1},
+            {x: 3, y: 0}, {x: 3, y: 1}, {x: 2, y: 2}, {x: 1, y: 3},
+            {x: 0, y: 3}, {x: -1, y: 3}, {x: -2, y: 2}, {x: -3, y: 1},
+            {x: -3, y: 0}, {x: -3, y: -1}, {x: -2, y: -2}, {x: -1, y: -3},
+            // Third ring
+            {x: 0, y: -4}, {x: 1, y: -3}, {x: 2, y: -3}, {x: 3, y: -2},
+            {x: 4, y: -1}, {x: 4, y: 0}, {x: 4, y: 1}, {x: 3, y: 2},
+            {x: 3, y: 3}, {x: 2, y: 3}, {x: 1, y: 4}, {x: 0, y: 4},
+            {x: -1, y: 4}, {x: -2, y: 3}, {x: -3, y: 2}, {x: -4, y: 1},
+            {x: -4, y: 0}, {x: -4, y: -1}, {x: -3, y: -2}, {x: -2, y: -3},
+            {x: -1, y: -4}
+        ];
+        
+        // Skip already placed extensions
+        const startIndex = currentCount;
+        
+        for (let i = startIndex; i < pattern.length && i < maxCount; i++) {
+            const offset = pattern[i];
+            const x = spawnPos.x + offset.x;
+            const y = spawnPos.y + offset.y;
+            
+            if (x >= 1 && x <= 48 && y >= 1 && y <= 48) {
+                const pos = new RoomPosition(x, y, room.name);
+                const terrain = pos.lookFor(LOOK_TERRAIN);
+                
+                if (terrain.length > 0 && terrain[0] !== 'wall') {
+                    const structures = pos.lookFor(LOOK_STRUCTURES);
+                    const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+                    
+                    if (structures.length === 0 && sites.length === 0) {
+                        pos.createConstructionSite(STRUCTURE_EXTENSION);
+                        return; // Place one at a time
+                    }
+                }
+            }
         }
     }
     
@@ -859,7 +999,36 @@ class ConstructionManager {
         
         if (towers.length < maxTowers) {
             const spawn = room.find(FIND_MY_SPAWNS)[0];
-            this.placeStructureNear(room, spawn.pos, STRUCTURE_TOWER, 3);
+            // Place tower near spawn but closer to edges for defense
+            this.placeTowerNear(room, spawn.pos);
+        }
+    }
+    
+    placeTowerNear(room, spawnPos) {
+        // Place tower 3-4 tiles from spawn in various directions
+        const offsets = [
+            {x: 3, y: 0}, {x: -3, y: 0}, {x: 0, y: 3}, {x: 0, y: -3},
+            {x: 3, y: 3}, {x: 3, y: -3}, {x: -3, y: 3}, {x: -3, y: -3}
+        ];
+        
+        for (const offset of offsets) {
+            const x = spawnPos.x + offset.x;
+            const y = spawnPos.y + offset.y;
+            
+            if (x >= 1 && x <= 48 && y >= 1 && y <= 48) {
+                const pos = new RoomPosition(x, y, room.name);
+                const terrain = pos.lookFor(LOOK_TERRAIN);
+                
+                if (terrain.length > 0 && terrain[0] !== 'wall') {
+                    const structures = pos.lookFor(LOOK_STRUCTURES);
+                    const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+                    
+                    if (structures.length === 0 && sites.length === 0) {
+                        pos.createConstructionSite(STRUCTURE_TOWER);
+                        return;
+                    }
+                }
+            }
         }
     }
     
@@ -870,23 +1039,61 @@ class ConstructionManager {
         
         if (storages.length === 0) {
             const spawn = room.find(FIND_MY_SPAWNS)[0];
-            this.placeStructureNear(room, spawn.pos, STRUCTURE_STORAGE, 2);
+            // Place storage 2 tiles from spawn
+            this.placeStorageNear(room, spawn.pos);
+        }
+    }
+    
+    placeStorageNear(room, spawnPos) {
+        // Place storage adjacent to spawn
+        const offsets = [
+            {x: 2, y: 0}, {x: -2, y: 0}, {x: 0, y: 2}, {x: 0, y: -2},
+            {x: 2, y: 1}, {x: 2, y: -1}, {x: -2, y: 1}, {x: -2, y: -1}
+        ];
+        
+        for (const offset of offsets) {
+            const x = spawnPos.x + offset.x;
+            const y = spawnPos.y + offset.y;
+            
+            if (x >= 1 && x <= 48 && y >= 1 && y <= 48) {
+                const pos = new RoomPosition(x, y, room.name);
+                const terrain = pos.lookFor(LOOK_TERRAIN);
+                
+                if (terrain.length > 0 && terrain[0] !== 'wall') {
+                    const structures = pos.lookFor(LOOK_STRUCTURES);
+                    const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+                    
+                    if (structures.length === 0 && sites.length === 0) {
+                        pos.createConstructionSite(STRUCTURE_STORAGE);
+                        return;
+                    }
+                }
+            }
         }
     }
     
     buildRoad(room, fromPos, toPos) {
         const path = fromPos.findPathTo(toPos, {
             ignoreCreeps: true,
-            ignoreRoads: true
+            ignoreRoads: false // Respect existing roads
         });
         
+        let placed = 0;
         for (const step of path) {
             const pos = new RoomPosition(step.x, step.y, room.name);
+            
+            // Skip positions with structures
             const structures = pos.lookFor(LOOK_STRUCTURES);
             const hasRoad = structures.some(s => s.structureType === STRUCTURE_ROAD);
+            const hasConstruction = pos.lookFor(LOOK_CONSTRUCTION_SITES).length > 0;
             
-            if (!hasRoad) {
+            // Don't build roads on top of structures or exits
+            if (!hasRoad && !hasConstruction && 
+                step.x > 0 && step.x < 49 && 
+                step.y > 0 && step.y < 49) {
                 pos.createConstructionSite(STRUCTURE_ROAD);
+                placed++;
+                if (placed >= 3) break; // Limit to 3 roads per tick
             }
         }
     }
@@ -920,15 +1127,21 @@ class ConstructionManager {
 /**
  * SpawnManager - Manages creep spawning with priority system
  * 
- * Phase 1: Fill all harvester positions (cycle: 2 harvesters, 1 upgrader)
- * Phase 2: Fill all upgrader positions
- * Phase 3: Spawn builders and repairers (1:1 ratio, max 3 each)
+ * Phase 1 (Early Game): 
+ *   - Spawn 2 harvesters (deliver to spawn)
+ *   - Then spawn 1 upgrader (self-mines)
+ * Phase 2 (Filling Harvesters):
+ *   - Continue spawning harvesters until all source positions filled
+ *   - Upgraders keep spawning (1 per 2 harvesters, minimum 1)
+ * Phase 3 (Stationary Mode):
+ *   - Once harvesters >= source positions, switch to stationary mode
+ *   - Harvesters drop energy at sources
+ *   - Builders/Repairers now spawn (1 builder : 2 repairers ratio, max 3 builders, 4 repairers)
+ * Emergency: 
+ *   - If harvesters drop below 2, revert to Phase 1
+ *   - Pause other spawning until harvesters rebuilt
  */
 class SpawnManager {
-    constructor() {
-        this.sourceManager = new SourceManager();
-    }
-
     run(room) {
         const spawns = room.find(FIND_MY_SPAWNS);
         const spawn = spawns[0];
@@ -944,79 +1157,156 @@ class SpawnManager {
         const builders = creeps.filter(c => c.memory.role === 'builder');
         const repairers = creeps.filter(c => c.memory.role === 'repairer');
 
-        // Get total needed harvesters from SourceManager
-        const needs = this.sourceManager.checkSpawnNeeds(room);
-        const totalNeededHarvesters = needs.length;
-        const desiredUpgraders = Math.ceil(totalNeededHarvesters / 2);
-
-        // PHASE 1: Fill all harvester positions around sources
-        if (harvesters.length < totalNeededHarvesters) {
-            const cyclePosition = (harvesters.length + upgraders.length) % 3;
+        // Calculate needed harvesters (open positions around sources)
+        const sources = room.find(FIND_SOURCES);
+        let totalSourcePositions = 0;
+        for (const source of sources) {
+            totalSourcePositions += this.countOpenPositions(source);
+        }
+        
+        // EMERGENCY MODE: Less than 2 harvesters
+        // This is critical - we need energy production immediately
+        if (harvesters.length < 2) {
+            // Force traditional mode for all harvesters
+            room.memory.stationaryMode = false;
             
-            if (cyclePosition === 0 || cyclePosition === 1) {
-                // Spawn harvester
-                const body = this.getHarvesterBody(energyCapacity);
-                if (energyAvailable >= this.calculateBodyCost(body)) {
-                    this.spawnHarvester(spawn, needs[0].source);
+            if (energyAvailable >= 200) {
+                // Spawn basic harvester that will deliver to spawn
+                const body = [WORK, CARRY, MOVE]; // Minimum viable body
+                const name = 'Harvester' + Game.time;
+                const source = sources[0];
+                if (source) {
+                    spawn.spawnCreep(body, name, {
+                        memory: { 
+                            role: 'harvester', 
+                            sourceId: source.id,
+                            delivering: false
+                        }
+                    });
+                    console.log('🚨 EMERGENCY: Spawning harvester ' + name);
                 }
-            } else {
-                // Spawn upgrader
-                if (upgraders.length < desiredUpgraders) {
-                    const body = this.getUpgraderBody(energyCapacity);
-                    if (energyAvailable >= this.calculateBodyCost(body)) {
-                        this.spawnUpgrader(spawn);
+            }
+            return;
+        }
+
+        // PHASE 1: Initial startup - exactly 2 harvesters, then 1 upgrader
+        if (harvesters.length < 2) {
+            // Should not reach here due to emergency check, but just in case
+            return;
+        }
+        
+        // We have 2+ harvesters, check if we have our first upgrader
+        if (harvesters.length === 2 && upgraders.length < 1) {
+            if (energyAvailable >= 200) {
+                this.spawnUpgrader(spawn, energyCapacity);
+            }
+            return;
+        }
+
+        // PHASE 2: Fill all harvester positions
+        // Keep spawning harvesters until all source positions are filled
+        if (harvesters.length < totalSourcePositions) {
+            if (energyAvailable >= this.getHarvesterCost(energyCapacity)) {
+                // Assign to source with fewest harvesters
+                let bestSource = sources[0];
+                let minHarvesters = Infinity;
+                
+                for (const source of sources) {
+                    const harvestersAtSource = harvesters.filter(h => h.memory.sourceId === source.id).length;
+                    if (harvestersAtSource < minHarvesters) {
+                        minHarvesters = harvestersAtSource;
+                        bestSource = source;
                     }
                 }
+                
+                this.spawnHarvester(spawn, bestSource, energyCapacity);
             }
             return;
         }
 
-        // PHASE 2: Fill all upgrader positions
+        // Check if we should switch to stationary mode
+        // This happens when we have enough harvesters to cover all source positions
+        if (harvesters.length >= totalSourcePositions) {
+            if (!room.memory.stationaryMode) {
+                console.log('🔄 Switching to stationary harvesting mode');
+                room.memory.stationaryMode = true;
+            }
+        }
+
+        // PHASE 3: Fill upgrader positions
+        // Calculate desired upgraders: 1 per 2 harvesters, minimum 1
+        const desiredUpgraders = Math.max(1, Math.ceil(harvesters.length / 2));
         if (upgraders.length < desiredUpgraders) {
-            const body = this.getUpgraderBody(energyCapacity);
-            if (energyAvailable >= this.calculateBodyCost(body)) {
-                this.spawnUpgrader(spawn);
+            const bodyCost = this.getUpgraderCost(energyCapacity);
+            if (energyAvailable >= bodyCost) {
+                this.spawnUpgrader(spawn, energyCapacity);
             }
             return;
         }
 
-        // PHASE 3: Spawn builders and repairers (1:1 ratio, max 3 each)
-        // Only after ALL harvesters AND ALL upgraders are complete
-        
+        // PHASE 4: Builders and Repairers
+        // Only spawn after harvesters and upgraders are complete
+        // Ratio: 1 builder : 2 repairers
+        // Max: 3 builders, 4 repairers
         const maxBuilders = 3;
-        const maxRepairers = 3;
+        const maxRepairers = 4;
         
-        // Determine which to spawn based on 1:1 ratio
-        // If builders == repairers, spawn builder first
-        // If builders > repairers, spawn repairer
-        const shouldSpawnBuilder = builders.length <= repairers.length;
+        // Check current ratio
+        const idealBuilders = Math.ceil((builders.length + repairers.length) / 3);
         
-        if (shouldSpawnBuilder && builders.length < maxBuilders) {
-            // Check if there are construction sites
+        // Spawn builder if needed and ratio allows
+        if (builders.length < maxBuilders && builders.length < idealBuilders) {
             const sites = room.find(FIND_CONSTRUCTION_SITES);
             if (sites.length > 0) {
-                const body = this.getBuilderBody(energyCapacity);
-                if (energyAvailable >= this.calculateBodyCost(body)) {
-                    this.spawnBuilder(spawn);
+                const bodyCost = this.getBuilderCost(energyCapacity);
+                if (energyAvailable >= bodyCost) {
+                    this.spawnBuilder(spawn, energyCapacity);
                 }
             }
             return;
         }
         
-        if (!shouldSpawnBuilder && repairers.length < maxRepairers) {
-            // Check if there are structures to repair
+        // Spawn repairer if needed
+        if (repairers.length < maxRepairers && repairers.length < builders.length * 2) {
             const needsRepair = this.needsRepair(room);
-            if (needsRepair) {
-                const body = this.getRepairerBody(energyCapacity);
-                if (energyAvailable >= this.calculateBodyCost(body)) {
-                    this.spawnRepairer(spawn);
+            if (needsRepair || repairers.length === 0) {
+                const bodyCost = this.getRepairerCost(energyCapacity);
+                if (energyAvailable >= bodyCost) {
+                    this.spawnRepairer(spawn, energyCapacity);
                 }
             }
         }
     }
+    
+    /**
+     * Count open positions around a source (where a creep can stand to harvest)
+     */
+    countOpenPositions(source) {
+        const room = source.room;
+        const terrain = room.getTerrain();
+        let count = 0;
+        
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                
+                const x = source.pos.x + dx;
+                const y = source.pos.y + dy;
+                
+                if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+                if (terrain.get(x, y) !== TERRAIN_MASK_WALL) {
+                    count++;
+                }
+            }
+        }
+        
+        return count;
+    }
 
+    /**
+     * Check if any structures need repair
+     */
     needsRepair(room) {
-        // Check if anything needs repair
         const damaged = room.find(FIND_STRUCTURES, {
             filter: s => {
                 if (s.structureType === STRUCTURE_ROAD && s.hits < s.hitsMax * 0.5) return true;
@@ -1029,18 +1319,19 @@ class SpawnManager {
         return damaged.length > 0;
     }
 
-    calculateBodyCost(body) {
-        const costs = {
-            [MOVE]: 50,
-            [WORK]: 100,
-            [CARRY]: 50
-        };
-        return body.reduce((sum, part) => sum + (costs[part] || 0), 0);
+    /**
+     * Get harvester body and calculate cost
+     */
+    getHarvesterCost(energyCapacity) {
+        // Traditional harvesters need CARRY to deliver to spawn
+        // Body: WORK(n), CARRY(1), MOVE(1)
+        const workParts = Math.min(Math.floor((energyCapacity - 100) / 100), 5);
+        return 100 * workParts + 100; // WORK parts + CARRY + MOVE
     }
 
     getHarvesterBody(energyCapacity) {
         const body = [];
-        let remaining = energyCapacity - 100;
+        let remaining = energyCapacity - 100; // Reserve for CARRY + MOVE
         const maxWork = Math.min(Math.floor(remaining / 100), 5);
         
         for (let i = 0; i < maxWork; i++) {
@@ -1049,6 +1340,12 @@ class SpawnManager {
         body.push(CARRY);
         body.push(MOVE);
         return body;
+    }
+
+    getUpgraderCost(energyCapacity) {
+        // Upgrader body: WORK, CARRY, MOVE repeating
+        const maxSets = Math.min(Math.floor(energyCapacity / 200), 16);
+        return maxSets > 0 ? maxSets * 200 : 200;
     }
 
     getUpgraderBody(energyCapacity) {
@@ -1063,6 +1360,11 @@ class SpawnManager {
         return body.length > 0 ? body : [WORK, CARRY, MOVE];
     }
 
+    getBuilderCost(energyCapacity) {
+        const maxSets = Math.min(Math.floor(energyCapacity / 200), 16);
+        return maxSets > 0 ? maxSets * 200 : 200;
+    }
+
     getBuilderBody(energyCapacity) {
         const body = [];
         const maxSets = Math.min(Math.floor(energyCapacity / 200), 16);
@@ -1073,6 +1375,11 @@ class SpawnManager {
             body.push(MOVE);
         }
         return body.length > 0 ? body : [WORK, CARRY, MOVE];
+    }
+
+    getRepairerCost(energyCapacity) {
+        const maxSets = Math.min(Math.floor(energyCapacity / 200), 16);
+        return maxSets > 0 ? maxSets * 200 : 200;
     }
 
     getRepairerBody(energyCapacity) {
@@ -1087,23 +1394,30 @@ class SpawnManager {
         return body.length > 0 ? body : [WORK, CARRY, MOVE];
     }
 
-    spawnHarvester(spawn, source) {
-        const body = this.getHarvesterBody(spawn.room.energyCapacityAvailable);
+    spawnHarvester(spawn, source, energyCapacity) {
+        if (!source) return ERR_INVALID_ARGS;
+        
+        const body = this.getHarvesterBody(energyCapacity);
         if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
 
         const name = 'Harvester' + Game.time;
         const result = spawn.spawnCreep(body, name, {
-            memory: { role: 'harvester', sourceId: source.id, harvestPos: null }
+            memory: { 
+                role: 'harvester', 
+                sourceId: source.id,
+                delivering: false,
+                harvestPos: null
+            }
         });
 
         if (result === OK) {
-            console.log('Spawning harvester: ' + name + ' [' + body.length + ' parts]');
+            console.log('🌱 Spawning harvester: ' + name + ' [' + body.length + ' parts]');
         }
         return result;
     }
 
-    spawnUpgrader(spawn) {
-        const body = this.getUpgraderBody(spawn.room.energyCapacityAvailable);
+    spawnUpgrader(spawn, energyCapacity) {
+        const body = this.getUpgraderBody(energyCapacity);
         if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
 
         const name = 'Upgrader' + Game.time;
@@ -1112,13 +1426,13 @@ class SpawnManager {
         });
 
         if (result === OK) {
-            console.log('Spawning upgrader: ' + name + ' [' + body.length + ' parts]');
+            console.log('⚡ Spawning upgrader: ' + name + ' [' + body.length + ' parts]');
         }
         return result;
     }
 
-    spawnBuilder(spawn) {
-        const body = this.getBuilderBody(spawn.room.energyCapacityAvailable);
+    spawnBuilder(spawn, energyCapacity) {
+        const body = this.getBuilderBody(energyCapacity);
         if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
 
         const name = 'Builder' + Game.time;
@@ -1127,13 +1441,13 @@ class SpawnManager {
         });
 
         if (result === OK) {
-            console.log('Spawning builder: ' + name + ' [' + body.length + ' parts]');
+            console.log('🔨 Spawning builder: ' + name + ' [' + body.length + ' parts]');
         }
         return result;
     }
 
-    spawnRepairer(spawn) {
-        const body = this.getRepairerBody(spawn.room.energyCapacityAvailable);
+    spawnRepairer(spawn, energyCapacity) {
+        const body = this.getRepairerBody(energyCapacity);
         if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
 
         const name = 'Repairer' + Game.time;
@@ -1142,7 +1456,7 @@ class SpawnManager {
         });
 
         if (result === OK) {
-            console.log('Spawning repairer: ' + name + ' [' + body.length + ' parts]');
+            console.log('🔧 Spawning repairer: ' + name + ' [' + body.length + ' parts]');
         }
         return result;
     }

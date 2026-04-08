@@ -1,19 +1,23 @@
 'use strict';
 
-const SourceManager = require('./SourceManager');
-
 /**
  * SpawnManager - Manages creep spawning with priority system
  * 
- * Phase 1: Fill all harvester positions (cycle: 2 harvesters, 1 upgrader)
- * Phase 2: Fill all upgrader positions
- * Phase 3: Spawn builders and repairers (1:1 ratio, max 3 each)
+ * Phase 1 (Early Game): 
+ *   - Spawn 2 harvesters (deliver to spawn)
+ *   - Then spawn 1 upgrader (self-mines)
+ * Phase 2 (Filling Harvesters):
+ *   - Continue spawning harvesters until all source positions filled
+ *   - Upgraders keep spawning (1 per 2 harvesters, minimum 1)
+ * Phase 3 (Stationary Mode):
+ *   - Once harvesters >= source positions, switch to stationary mode
+ *   - Harvesters drop energy at sources
+ *   - Builders/Repairers now spawn (1 builder : 2 repairers ratio, max 3 builders, 4 repairers)
+ * Emergency: 
+ *   - If harvesters drop below 2, revert to Phase 1
+ *   - Pause other spawning until harvesters rebuilt
  */
 class SpawnManager {
-    constructor() {
-        this.sourceManager = new SourceManager();
-    }
-
     run(room) {
         const spawns = room.find(FIND_MY_SPAWNS);
         const spawn = spawns[0];
@@ -29,79 +33,156 @@ class SpawnManager {
         const builders = creeps.filter(c => c.memory.role === 'builder');
         const repairers = creeps.filter(c => c.memory.role === 'repairer');
 
-        // Get total needed harvesters from SourceManager
-        const needs = this.sourceManager.checkSpawnNeeds(room);
-        const totalNeededHarvesters = needs.length;
-        const desiredUpgraders = Math.ceil(totalNeededHarvesters / 2);
-
-        // PHASE 1: Fill all harvester positions around sources
-        if (harvesters.length < totalNeededHarvesters) {
-            const cyclePosition = (harvesters.length + upgraders.length) % 3;
+        // Calculate needed harvesters (open positions around sources)
+        const sources = room.find(FIND_SOURCES);
+        let totalSourcePositions = 0;
+        for (const source of sources) {
+            totalSourcePositions += this.countOpenPositions(source);
+        }
+        
+        // EMERGENCY MODE: Less than 2 harvesters
+        // This is critical - we need energy production immediately
+        if (harvesters.length < 2) {
+            // Force traditional mode for all harvesters
+            room.memory.stationaryMode = false;
             
-            if (cyclePosition === 0 || cyclePosition === 1) {
-                // Spawn harvester
-                const body = this.getHarvesterBody(energyCapacity);
-                if (energyAvailable >= this.calculateBodyCost(body)) {
-                    this.spawnHarvester(spawn, needs[0].source);
+            if (energyAvailable >= 200) {
+                // Spawn basic harvester that will deliver to spawn
+                const body = [WORK, CARRY, MOVE]; // Minimum viable body
+                const name = 'Harvester' + Game.time;
+                const source = sources[0];
+                if (source) {
+                    spawn.spawnCreep(body, name, {
+                        memory: { 
+                            role: 'harvester', 
+                            sourceId: source.id,
+                            delivering: false
+                        }
+                    });
+                    console.log('🚨 EMERGENCY: Spawning harvester ' + name);
                 }
-            } else {
-                // Spawn upgrader
-                if (upgraders.length < desiredUpgraders) {
-                    const body = this.getUpgraderBody(energyCapacity);
-                    if (energyAvailable >= this.calculateBodyCost(body)) {
-                        this.spawnUpgrader(spawn);
+            }
+            return;
+        }
+
+        // PHASE 1: Initial startup - exactly 2 harvesters, then 1 upgrader
+        if (harvesters.length < 2) {
+            // Should not reach here due to emergency check, but just in case
+            return;
+        }
+        
+        // We have 2+ harvesters, check if we have our first upgrader
+        if (harvesters.length === 2 && upgraders.length < 1) {
+            if (energyAvailable >= 200) {
+                this.spawnUpgrader(spawn, energyCapacity);
+            }
+            return;
+        }
+
+        // PHASE 2: Fill all harvester positions
+        // Keep spawning harvesters until all source positions are filled
+        if (harvesters.length < totalSourcePositions) {
+            if (energyAvailable >= this.getHarvesterCost(energyCapacity)) {
+                // Assign to source with fewest harvesters
+                let bestSource = sources[0];
+                let minHarvesters = Infinity;
+                
+                for (const source of sources) {
+                    const harvestersAtSource = harvesters.filter(h => h.memory.sourceId === source.id).length;
+                    if (harvestersAtSource < minHarvesters) {
+                        minHarvesters = harvestersAtSource;
+                        bestSource = source;
                     }
                 }
+                
+                this.spawnHarvester(spawn, bestSource, energyCapacity);
             }
             return;
         }
 
-        // PHASE 2: Fill all upgrader positions
+        // Check if we should switch to stationary mode
+        // This happens when we have enough harvesters to cover all source positions
+        if (harvesters.length >= totalSourcePositions) {
+            if (!room.memory.stationaryMode) {
+                console.log('🔄 Switching to stationary harvesting mode');
+                room.memory.stationaryMode = true;
+            }
+        }
+
+        // PHASE 3: Fill upgrader positions
+        // Calculate desired upgraders: 1 per 2 harvesters, minimum 1
+        const desiredUpgraders = Math.max(1, Math.ceil(harvesters.length / 2));
         if (upgraders.length < desiredUpgraders) {
-            const body = this.getUpgraderBody(energyCapacity);
-            if (energyAvailable >= this.calculateBodyCost(body)) {
-                this.spawnUpgrader(spawn);
+            const bodyCost = this.getUpgraderCost(energyCapacity);
+            if (energyAvailable >= bodyCost) {
+                this.spawnUpgrader(spawn, energyCapacity);
             }
             return;
         }
 
-        // PHASE 3: Spawn builders and repairers (1:1 ratio, max 3 each)
-        // Only after ALL harvesters AND ALL upgraders are complete
-        
+        // PHASE 4: Builders and Repairers
+        // Only spawn after harvesters and upgraders are complete
+        // Ratio: 1 builder : 2 repairers
+        // Max: 3 builders, 4 repairers
         const maxBuilders = 3;
-        const maxRepairers = 3;
+        const maxRepairers = 4;
         
-        // Determine which to spawn based on 1:1 ratio
-        // If builders == repairers, spawn builder first
-        // If builders > repairers, spawn repairer
-        const shouldSpawnBuilder = builders.length <= repairers.length;
+        // Check current ratio
+        const idealBuilders = Math.ceil((builders.length + repairers.length) / 3);
         
-        if (shouldSpawnBuilder && builders.length < maxBuilders) {
-            // Check if there are construction sites
+        // Spawn builder if needed and ratio allows
+        if (builders.length < maxBuilders && builders.length < idealBuilders) {
             const sites = room.find(FIND_CONSTRUCTION_SITES);
             if (sites.length > 0) {
-                const body = this.getBuilderBody(energyCapacity);
-                if (energyAvailable >= this.calculateBodyCost(body)) {
-                    this.spawnBuilder(spawn);
+                const bodyCost = this.getBuilderCost(energyCapacity);
+                if (energyAvailable >= bodyCost) {
+                    this.spawnBuilder(spawn, energyCapacity);
                 }
             }
             return;
         }
         
-        if (!shouldSpawnBuilder && repairers.length < maxRepairers) {
-            // Check if there are structures to repair
+        // Spawn repairer if needed
+        if (repairers.length < maxRepairers && repairers.length < builders.length * 2) {
             const needsRepair = this.needsRepair(room);
-            if (needsRepair) {
-                const body = this.getRepairerBody(energyCapacity);
-                if (energyAvailable >= this.calculateBodyCost(body)) {
-                    this.spawnRepairer(spawn);
+            if (needsRepair || repairers.length === 0) {
+                const bodyCost = this.getRepairerCost(energyCapacity);
+                if (energyAvailable >= bodyCost) {
+                    this.spawnRepairer(spawn, energyCapacity);
                 }
             }
         }
     }
+    
+    /**
+     * Count open positions around a source (where a creep can stand to harvest)
+     */
+    countOpenPositions(source) {
+        const room = source.room;
+        const terrain = room.getTerrain();
+        let count = 0;
+        
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                
+                const x = source.pos.x + dx;
+                const y = source.pos.y + dy;
+                
+                if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+                if (terrain.get(x, y) !== TERRAIN_MASK_WALL) {
+                    count++;
+                }
+            }
+        }
+        
+        return count;
+    }
 
+    /**
+     * Check if any structures need repair
+     */
     needsRepair(room) {
-        // Check if anything needs repair
         const damaged = room.find(FIND_STRUCTURES, {
             filter: s => {
                 if (s.structureType === STRUCTURE_ROAD && s.hits < s.hitsMax * 0.5) return true;
@@ -114,18 +195,19 @@ class SpawnManager {
         return damaged.length > 0;
     }
 
-    calculateBodyCost(body) {
-        const costs = {
-            [MOVE]: 50,
-            [WORK]: 100,
-            [CARRY]: 50
-        };
-        return body.reduce((sum, part) => sum + (costs[part] || 0), 0);
+    /**
+     * Get harvester body and calculate cost
+     */
+    getHarvesterCost(energyCapacity) {
+        // Traditional harvesters need CARRY to deliver to spawn
+        // Body: WORK(n), CARRY(1), MOVE(1)
+        const workParts = Math.min(Math.floor((energyCapacity - 100) / 100), 5);
+        return 100 * workParts + 100; // WORK parts + CARRY + MOVE
     }
 
     getHarvesterBody(energyCapacity) {
         const body = [];
-        let remaining = energyCapacity - 100;
+        let remaining = energyCapacity - 100; // Reserve for CARRY + MOVE
         const maxWork = Math.min(Math.floor(remaining / 100), 5);
         
         for (let i = 0; i < maxWork; i++) {
@@ -134,6 +216,12 @@ class SpawnManager {
         body.push(CARRY);
         body.push(MOVE);
         return body;
+    }
+
+    getUpgraderCost(energyCapacity) {
+        // Upgrader body: WORK, CARRY, MOVE repeating
+        const maxSets = Math.min(Math.floor(energyCapacity / 200), 16);
+        return maxSets > 0 ? maxSets * 200 : 200;
     }
 
     getUpgraderBody(energyCapacity) {
@@ -148,6 +236,11 @@ class SpawnManager {
         return body.length > 0 ? body : [WORK, CARRY, MOVE];
     }
 
+    getBuilderCost(energyCapacity) {
+        const maxSets = Math.min(Math.floor(energyCapacity / 200), 16);
+        return maxSets > 0 ? maxSets * 200 : 200;
+    }
+
     getBuilderBody(energyCapacity) {
         const body = [];
         const maxSets = Math.min(Math.floor(energyCapacity / 200), 16);
@@ -158,6 +251,11 @@ class SpawnManager {
             body.push(MOVE);
         }
         return body.length > 0 ? body : [WORK, CARRY, MOVE];
+    }
+
+    getRepairerCost(energyCapacity) {
+        const maxSets = Math.min(Math.floor(energyCapacity / 200), 16);
+        return maxSets > 0 ? maxSets * 200 : 200;
     }
 
     getRepairerBody(energyCapacity) {
@@ -172,23 +270,30 @@ class SpawnManager {
         return body.length > 0 ? body : [WORK, CARRY, MOVE];
     }
 
-    spawnHarvester(spawn, source) {
-        const body = this.getHarvesterBody(spawn.room.energyCapacityAvailable);
+    spawnHarvester(spawn, source, energyCapacity) {
+        if (!source) return ERR_INVALID_ARGS;
+        
+        const body = this.getHarvesterBody(energyCapacity);
         if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
 
         const name = 'Harvester' + Game.time;
         const result = spawn.spawnCreep(body, name, {
-            memory: { role: 'harvester', sourceId: source.id, harvestPos: null }
+            memory: { 
+                role: 'harvester', 
+                sourceId: source.id,
+                delivering: false,
+                harvestPos: null
+            }
         });
 
         if (result === OK) {
-            console.log('Spawning harvester: ' + name + ' [' + body.length + ' parts]');
+            console.log('🌱 Spawning harvester: ' + name + ' [' + body.length + ' parts]');
         }
         return result;
     }
 
-    spawnUpgrader(spawn) {
-        const body = this.getUpgraderBody(spawn.room.energyCapacityAvailable);
+    spawnUpgrader(spawn, energyCapacity) {
+        const body = this.getUpgraderBody(energyCapacity);
         if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
 
         const name = 'Upgrader' + Game.time;
@@ -197,13 +302,13 @@ class SpawnManager {
         });
 
         if (result === OK) {
-            console.log('Spawning upgrader: ' + name + ' [' + body.length + ' parts]');
+            console.log('⚡ Spawning upgrader: ' + name + ' [' + body.length + ' parts]');
         }
         return result;
     }
 
-    spawnBuilder(spawn) {
-        const body = this.getBuilderBody(spawn.room.energyCapacityAvailable);
+    spawnBuilder(spawn, energyCapacity) {
+        const body = this.getBuilderBody(energyCapacity);
         if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
 
         const name = 'Builder' + Game.time;
@@ -212,13 +317,13 @@ class SpawnManager {
         });
 
         if (result === OK) {
-            console.log('Spawning builder: ' + name + ' [' + body.length + ' parts]');
+            console.log('🔨 Spawning builder: ' + name + ' [' + body.length + ' parts]');
         }
         return result;
     }
 
-    spawnRepairer(spawn) {
-        const body = this.getRepairerBody(spawn.room.energyCapacityAvailable);
+    spawnRepairer(spawn, energyCapacity) {
+        const body = this.getRepairerBody(energyCapacity);
         if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
 
         const name = 'Repairer' + Game.time;
@@ -227,7 +332,7 @@ class SpawnManager {
         });
 
         if (result === OK) {
-            console.log('Spawning repairer: ' + name + ' [' + body.length + ' parts]');
+            console.log('🔧 Spawning repairer: ' + name + ' [' + body.length + ' parts]');
         }
         return result;
     }

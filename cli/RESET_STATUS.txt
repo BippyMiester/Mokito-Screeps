@@ -1,0 +1,25 @@
+
+========================================
+SCREEPS SERVER RESET COMPLETE
+========================================
+
+✅ Database wiped:
+   - /root/db.json cleared
+   - All users removed (0 records)
+   - All rooms removed (0 records)
+   - All code removed (0 records)
+   - Database size: 834 bytes (empty)
+
+✅ Server stopped:
+   - Systemd service disabled
+   - All processes killed
+   - Logs cleared
+
+⏭️  Next steps:
+   1. Start server: cd /root && npx screeps start
+   2. Set tick rate: node /root/bot/cli/set-tickrate.js 250
+   3. Create account in game client
+   4. Upload your bot code
+
+========================================
+

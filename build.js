@@ -24,6 +24,11 @@ const buildOrder = [
     'src/roles/RemoteHarvester.js',
     'src/roles/Hauler.js',
     'src/roles/Claimer.js',
+    // Military roles
+    'src/roles/Defender.js',
+    'src/roles/Attacker.js',
+    'src/roles/Healer.js',
+    'src/roles/Scout.js',
     // Managers - dependencies before dependents
     'src/managers/SourceManager.js',
     'src/managers/MemoryManager.js',

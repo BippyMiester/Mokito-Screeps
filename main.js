@@ -2,7 +2,7 @@
 
 // ============================================
 // Mokito Bot - Combined Build
-// Built: 2026-04-08T10:53:54.650Z
+// Built: 2026-04-08T11:53:55.447Z
 // ============================================
 
 
@@ -1996,6 +1996,1149 @@ class Claimer {
     }
 }
 
+// --- Defender.js ---
+/**
+ * Defender - Protects room from hostile creeps
+ * Automatically spawned when enemies are detected in the room
+ * Targets hostile creeps, prioritizing healers and dangerous units
+ */
+class Defender {
+    run(creep) {
+        // Check if we're under attack
+        if (!this.isRoomUnderAttack(creep.room)) {
+            // No enemies - move to rally point near spawn or recycle
+            this.moveToRallyPoint(creep);
+            return;
+        }
+
+        // Find and attack hostile creeps
+        const target = this.findPriorityTarget(creep);
+        
+        if (target) {
+            this.engageTarget(creep, target);
+        } else {
+            // No visible hostiles but attack timer active - patrol
+            this.patrolRoom(creep);
+        }
+    }
+
+    /**
+     * Check if room is currently under attack
+     */
+    isRoomUnderAttack(room) {
+        // Check memory for attack timer
+        if (room.memory.attackTimer > 0) {
+            return true;
+        }
+        
+        // Check for hostile creeps
+        const hostiles = room.find(FIND_HOSTILE_CREEPS);
+        if (hostiles.length > 0) {
+            // Set attack timer (decrements in RoomManager)
+            room.memory.attackTimer = 20; // 20 ticks of alert after last seen
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * Find priority target for attack
+     * Priority: Healers > Ranged attackers > Melee attackers > Workers
+     */
+    findPriorityTarget(creep) {
+        const hostiles = creep.room.find(FIND_HOSTILE_CREEPS);
+        
+        if (hostiles.length === 0) {
+            return null;
+        }
+
+        // Score each hostile by threat level
+        const scored = hostiles.map(hostile => {
+            let score = 0;
+            
+            // Check body parts
+            const body = hostile.body;
+            const healParts = body.filter(p => p.type === HEAL).length;
+            const rangedParts = body.filter(p => p.type === RANGED_ATTACK).length;
+            const attackParts = body.filter(p => p.type === ATTACK).length;
+            const workParts = body.filter(p => p.type === WORK).length;
+            
+            // Prioritize by threat (higher score = higher priority)
+            if (healParts > 0) score += 100 + healParts * 10; // Healers are top priority
+            if (rangedParts > 0) score += 50 + rangedParts * 5; // Ranged attackers
+            if (attackParts > 0) score += 30 + attackParts * 3; // Melee attackers
+            if (workParts > 0) score += 10; // Workers/collectors
+            
+            // Prefer closer targets slightly
+            const range = creep.pos.getRangeTo(hostile);
+            score -= range * 0.5;
+            
+            return { hostile, score };
+        });
+        
+        // Sort by score descending
+        scored.sort((a, b) => b.score - a.score);
+        
+        return scored[0].hostile;
+    }
+
+    /**
+     * Engage a target in combat
+     */
+    engageTarget(creep, target) {
+        const range = creep.pos.getRangeTo(target);
+        
+        // If we're damaged and not at full health, check if we should retreat
+        if (creep.hits < creep.hitsMax * 0.5) {
+            // Retreat to heal if possible
+            this.retreatIfPossible(creep, target);
+            return;
+        }
+        
+        if (range <= 1) {
+            // Adjacent - attack
+            creep.attack(target);
+            creep.say('⚔️ attack');
+        } else {
+            // Move closer
+            const result = creep.moveTo(target, {
+                visualizePathStyle: { stroke: '#ff0000' },
+                reusePath: 3
+            });
+            
+            // Try to attack if in range (might have moved)
+            if (creep.pos.getRangeTo(target) <= 1) {
+                creep.attack(target);
+            }
+        }
+    }
+
+    /**
+     * Retreat to a safer position if possible
+     */
+    retreatIfPossible(creep, threat) {
+        // Find direction away from threat
+        const dx = creep.pos.x - threat.pos.x;
+        const dy = creep.pos.y - threat.pos.y;
+        
+        // Calculate retreat position
+        let retreatX = creep.pos.x + Math.sign(dx) * 2;
+        let retreatY = creep.pos.y + Math.sign(dy) * 2;
+        
+        // Clamp to room bounds
+        retreatX = Math.max(1, Math.min(48, retreatX));
+        retreatY = Math.max(1, Math.min(48, retreatY));
+        
+        const retreatPos = new RoomPosition(retreatX, retreatY, creep.room.name);
+        
+        // Check if retreat position is safe (no hostiles adjacent)
+        const hostilesAtRetreat = retreatPos.findInRange(FIND_HOSTILE_CREEPS, 1);
+        
+        if (hostilesAtRetreat.length === 0) {
+            // Safe to retreat
+            creep.moveTo(retreatPos, {
+                visualizePathStyle: { stroke: '#ffff00' }
+            });
+            creep.say('🏃 retreat');
+            
+            // Self-heal if we have heal parts
+            if (creep.body.some(p => p.type === HEAL && p.hits > 0)) {
+                creep.heal(creep);
+            }
+        } else {
+            // Can't retreat safely, fight on
+            if (creep.pos.getRangeTo(threat) <= 1) {
+                creep.attack(threat);
+            }
+        }
+    }
+
+    /**
+     * Move to rally point when no enemies present
+     */
+    moveToRallyPoint(creep) {
+        const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
+        if (spawn) {
+            // Stay near spawn but not on top of it
+            if (!creep.pos.inRangeTo(spawn, 3)) {
+                creep.moveTo(spawn, {
+                    range: 3,
+                    visualizePathStyle: { stroke: '#00ff00' }
+                });
+            } else {
+                // At rally point - heal up if damaged
+                if (creep.hits < creep.hitsMax && 
+                    creep.body.some(p => p.type === HEAL && p.hits > 0)) {
+                    creep.heal(creep);
+                }
+            }
+        }
+    }
+
+    /**
+     * Patrol room when attack timer active but no visible enemies
+     */
+    patrolRoom(creep) {
+        const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
+        if (spawn) {
+            // Move between spawn and controller
+            const controller = creep.room.controller;
+            if (controller) {
+                const target = creep.pos.getRangeTo(spawn) > creep.pos.getRangeTo(controller) 
+                    ? spawn 
+                    : controller;
+                
+                creep.moveTo(target, {
+                    range: 5,
+                    visualizePathStyle: { stroke: '#00ff00' }
+                });
+            }
+        }
+    }
+}
+
+// --- Attacker.js ---
+/**
+ * Attacker - Part of attack squads (3 attackers + 1 healer)
+ * Travels to enemy rooms and destroys structures/spawn
+ * Coordinates with squad members - waits until full group before attacking
+ */
+class Attacker {
+    run(creep) {
+        // Check if we're part of a squad
+        if (!creep.memory.squadId) {
+            creep.say('❌ no squad');
+            return;
+        }
+
+        // Get squad info
+        const squad = Memory.attackSquads[creep.memory.squadId];
+        if (!squad) {
+            // Squad doesn't exist, try to find a new one
+            this.findNewSquad(creep);
+            return;
+        }
+
+        // Check if squad is ready (all 4 members spawned)
+        if (!squad.ready) {
+            this.waitForSquad(creep, squad);
+            return;
+        }
+
+        // Squad is ready - proceed with attack
+        this.executeAttack(creep, squad);
+    }
+
+    /**
+     * Find a new squad to join
+     */
+    findNewSquad(creep) {
+        // Look for squads needing attackers
+        for (const squadId in Memory.attackSquads) {
+            const squad = Memory.attackSquads[squadId];
+            if (squad.members.attackers.length < 3) {
+                // Join this squad
+                creep.memory.squadId = squadId;
+                squad.members.attackers.push(creep.name);
+                creep.say('🎖️ joined');
+                return;
+            }
+        }
+
+        // No squad found - wait
+        creep.say('⏳ waiting');
+    }
+
+    /**
+     * Wait for full squad to form near spawn
+     */
+    waitForSquad(creep, squad) {
+        // Move to spawn
+        const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
+        if (!spawn) return;
+
+        // Stay near spawn
+        if (!creep.pos.inRangeTo(spawn, 3)) {
+            creep.moveTo(spawn, { range: 3 });
+            return;
+        }
+
+        // Count current squad members present
+        const presentAttackers = squad.members.attackers.filter(name => {
+            const otherCreep = Game.creeps[name];
+            return otherCreep && otherCreep.room.name === creep.room.name;
+        });
+
+        const presentHealers = squad.members.healers.filter(name => {
+            const otherCreep = Game.creeps[name];
+            return otherCreep && otherCreep.room.name === creep.room.name;
+        });
+
+        // Check if full squad is ready
+        if (presentAttackers.length >= 3 && presentHealers.length >= 1) {
+            squad.ready = true;
+            console.log(`🎖️ Squad ${creep.memory.squadId} is ready to attack ${squad.targetRoom}!`);
+            
+            // Notify all squad members
+            for (const name of [...squad.members.attackers, ...squad.members.healers]) {
+                const otherCreep = Game.creeps[name];
+                if (otherCreep) {
+                    otherCreep.say('⚔️ CHARGE!');
+                }
+            }
+        } else {
+            // Show waiting status
+            creep.say(`⏳ ${presentAttackers.length}/3A ${presentHealers.length}/1H`);
+        }
+    }
+
+    /**
+     * Execute attack on target room
+     */
+    executeAttack(creep, squad) {
+        // Check if we need to retreat
+        if (this.shouldRetreat(creep)) {
+            this.retreat(creep, squad);
+            return;
+        }
+
+        // Travel to target room
+        if (creep.room.name !== squad.targetRoom) {
+            this.travelToTarget(creep, squad.targetRoom);
+            return;
+        }
+
+        // In target room - find something to attack
+        const target = this.findAttackTarget(creep, squad);
+        
+        if (target) {
+            this.attackTarget(creep, target);
+        } else {
+            // Nothing to attack - maybe room is cleared
+            this.handleRoomCleared(creep, squad);
+        }
+    }
+
+    /**
+     * Determine if creep should retreat
+     */
+    shouldRetreat(creep) {
+        // Retreat if heavily damaged
+        if (creep.hits < creep.hitsMax * 0.3) {
+            return true;
+        }
+
+        // Retreat if no healer nearby and damaged
+        if (creep.hits < creep.hitsMax * 0.6) {
+            const healerNearby = this.findNearbyHealer(creep);
+            if (!healerNearby) {
+                return true;
+            }
+        }
+
+        // Retreat if surrounded by enemies
+        const nearbyHostiles = creep.pos.findInRange(FIND_HOSTILE_CREEPS, 2);
+        if (nearbyHostiles.length >= 3) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Find a nearby healer from our squad
+     */
+    findNearbyHealer(creep) {
+        const squad = Memory.attackSquads[creep.memory.squadId];
+        if (!squad) return null;
+
+        for (const healerName of squad.members.healers) {
+            const healer = Game.creeps[healerName];
+            if (healer && healer.room.name === creep.room.name) {
+                const range = creep.pos.getRangeTo(healer);
+                if (range <= 3) {
+                    return healer;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Retreat to safer position
+     */
+    retreat(creep, squad) {
+        // Try to move toward a healer or exit
+        const healer = this.findNearbyHealer(creep);
+        
+        if (healer) {
+            creep.moveTo(healer, {
+                visualizePathStyle: { stroke: '#ffff00' }
+            });
+            creep.say('🏃 to healer');
+        } else {
+            // Retreat toward exit
+            const exit = creep.pos.findClosestByRange(FIND_EXIT);
+            if (exit) {
+                creep.moveTo(exit, {
+                    visualizePathStyle: { stroke: '#ffff00' }
+                });
+                creep.say('🏃 retreat');
+            }
+        }
+
+        // Self-heal if we have heal parts
+        if (creep.body.some(p => p.type === HEAL && p.hits > 0)) {
+            creep.heal(creep);
+        }
+    }
+
+    /**
+     * Travel to target room
+     */
+    travelToTarget(creep, targetRoom) {
+        const route = Game.map.findRoute(creep.room.name, targetRoom);
+        
+        if (route === ERR_NO_PATH) {
+            creep.say('❌ no path');
+            return;
+        }
+
+        if (route.length > 0) {
+            const exitDir = route[0].exit;
+            const exit = creep.pos.findClosestByPath(exitDir);
+            
+            if (exit) {
+                creep.moveTo(exit, {
+                    visualizePathStyle: { stroke: '#ff0000' }
+                });
+            }
+        }
+    }
+
+    /**
+     * Find priority target to attack
+     * Priority: Spawn > Towers > Extensions > Controller > Other structures
+     */
+    findAttackTarget(creep, squad) {
+        // Priority 1: Enemy spawn
+        const spawn = creep.pos.findClosestByPath(FIND_HOSTILE_SPAWNS);
+        if (spawn) {
+            return { target: spawn, priority: 'spawn' };
+        }
+
+        // Priority 2: Towers
+        const tower = creep.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_TOWER
+        });
+        if (tower) {
+            return { target: tower, priority: 'tower' };
+        }
+
+        // Priority 3: Extensions
+        const extension = creep.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_EXTENSION
+        });
+        if (extension) {
+            return { target: extension, priority: 'extension' };
+        }
+
+        // Priority 4: Controller
+        if (creep.room.controller) {
+            return { target: creep.room.controller, priority: 'controller' };
+        }
+
+        // Priority 5: Any hostile structure
+        const structure = creep.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES);
+        if (structure) {
+            return { target: structure, priority: 'structure' };
+        }
+
+        // Priority 6: Hostile creeps
+        const hostile = creep.pos.findClosestByPath(FIND_HOSTILE_CREEPS);
+        if (hostile) {
+            return { target: hostile, priority: 'creep' };
+        }
+
+        // Priority 7: Construction sites
+        const site = creep.pos.findClosestByPath(FIND_CONSTRUCTION_SITES);
+        if (site) {
+            return { target: site, priority: 'construction' };
+        }
+
+        return null;
+    }
+
+    /**
+     * Attack a target
+     */
+    attackTarget(creep, targetInfo) {
+        const target = targetInfo.target;
+        const range = creep.pos.getRangeTo(target);
+
+        if (range <= 1) {
+            // Adjacent - attack
+            creep.attack(target);
+            creep.say(`⚔️ ${targetInfo.priority}`);
+        } else {
+            // Move closer
+            creep.moveTo(target, {
+                visualizePathStyle: { stroke: '#ff0000' },
+                maxRooms: 1
+            });
+            
+            // Try attacking anyway (might be in range)
+            if (creep.pos.getRangeTo(target) <= 1) {
+                creep.attack(target);
+            }
+        }
+    }
+
+    /**
+     * Handle when room appears to be cleared
+     */
+    handleRoomCleared(creep, squad) {
+        // Check if controller is safe mode
+        if (creep.room.controller && creep.room.controller.safeMode) {
+            // Wait for safe mode to expire
+            creep.say('⏳ safe mode');
+            
+            // Attack construction sites if any
+            const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+            if (sites.length > 0) {
+                creep.moveTo(sites[0]);
+                creep.attack(sites[0]);
+            }
+            return;
+        }
+
+        // Room seems cleared - report success
+        console.log(`✅ Squad ${creep.memory.squadId} has cleared ${creep.room.name}`);
+        
+        // Mark squad as successful
+        squad.status = 'success';
+        
+        // Move to a rally point or return home
+        const homeRoom = Game.rooms[squad.homeRoom];
+        if (homeRoom) {
+            const spawn = homeRoom.find(FIND_MY_SPAWNS)[0];
+            if (spawn) {
+                creep.moveTo(spawn);
+            }
+        }
+    }
+}
+
+// --- Healer.js ---
+/**
+ * Healer - Part of attack squads (1 healer per squad of 4)
+ * Heals attackers and keeps the squad alive
+ * Follows attackers and maintains formation
+ */
+class Healer {
+    run(creep) {
+        // Check if we're part of a squad
+        if (!creep.memory.squadId) {
+            creep.say('❌ no squad');
+            return;
+        }
+
+        const squad = Memory.attackSquads[creep.memory.squadId];
+        if (!squad) {
+            creep.say('❌ squad gone');
+            return;
+        }
+
+        // Check if we need to retreat
+        if (this.shouldRetreat(creep)) {
+            this.retreat(creep);
+            return;
+        }
+
+        // Self-heal if damaged
+        if (creep.hits < creep.hitsMax && 
+            creep.body.some(p => p.type === HEAL && p.hits > 0)) {
+            creep.heal(creep);
+        }
+
+        // Squad not ready yet - wait at spawn
+        if (!squad.ready) {
+            this.waitForSquad(creep, squad);
+            return;
+        }
+
+        // Squad is ready - follow and heal attackers
+        this.supportSquad(creep, squad);
+    }
+
+    /**
+     * Wait for full squad formation near spawn
+     */
+    waitForSquad(creep, squad) {
+        const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
+        if (!spawn) return;
+
+        // Stay near spawn
+        if (!creep.pos.inRangeTo(spawn, 3)) {
+            creep.moveTo(spawn, { range: 3 });
+        } else {
+            // Check squad status
+            const presentAttackers = squad.members.attackers.filter(name => {
+                const other = Game.creeps[name];
+                return other && other.room.name === creep.room.name;
+            }).length;
+
+            const presentHealers = squad.members.healers.filter(name => {
+                const other = Game.creeps[name];
+                return other && other.room.name === creep.room.name;
+            }).length;
+
+            creep.say(`⏳ ${presentAttackers}/3A`);
+
+            // Heal any damaged squad members nearby
+            const damagedSquadMate = this.findDamagedSquadMate(creep, squad);
+            if (damagedSquadMate) {
+                this.healTarget(creep, damagedSquadMate);
+            }
+        }
+    }
+
+    /**
+     * Support the squad by healing and following attackers
+     */
+    supportSquad(creep, squad) {
+        // Travel to target room if needed
+        if (creep.room.name !== squad.targetRoom) {
+            this.travelToTarget(creep, squad.targetRoom);
+            return;
+        }
+
+        // In target room - find someone to heal
+        const healTarget = this.findBestHealTarget(creep, squad);
+        
+        if (healTarget) {
+            this.healTarget(creep, healTarget);
+        } else {
+            // No one to heal - follow the closest attacker
+            this.followAttacker(creep, squad);
+        }
+    }
+
+    /**
+     * Find the best target to heal
+     * Priority: Dying squad members > Damaged squad members > Damaged self
+     */
+    findBestHealTarget(creep, squad) {
+        const allSquadMembers = [...squad.members.attackers, ...squad.members.healers];
+        let bestTarget = null;
+        let bestPriority = -1;
+
+        for (const name of allSquadMembers) {
+            const targetCreep = Game.creeps[name];
+            if (!targetCreep || targetCreep.name === creep.name) continue;
+            if (targetCreep.room.name !== creep.room.name) continue;
+
+            const healthPercent = targetCreep.hits / targetCreep.hitsMax;
+            const range = creep.pos.getRangeTo(targetCreep);
+
+            // Calculate priority (higher = more urgent)
+            let priority = 0;
+            
+            // Critical health = very high priority
+            if (healthPercent < 0.3) priority += 100;
+            else if (healthPercent < 0.5) priority += 50;
+            else if (healthPercent < 0.8) priority += 20;
+
+            // Attacking creeps get priority over healers
+            if (squad.members.attackers.includes(name)) priority += 10;
+
+            // Closer targets get slight priority
+            priority -= range * 2;
+
+            if (priority > bestPriority) {
+                bestPriority = priority;
+                bestTarget = targetCreep;
+            }
+        }
+
+        return bestTarget;
+    }
+
+    /**
+     * Find damaged squad members near spawn while waiting
+     */
+    findDamagedSquadMate(creep, squad) {
+        const allMembers = [...squad.members.attackers, ...squad.members.healers];
+        
+        for (const name of allMembers) {
+            if (name === creep.name) continue;
+            
+            const other = Game.creeps[name];
+            if (!other || other.room.name !== creep.room.name) continue;
+            if (other.hits >= other.hitsMax) continue;
+
+            const range = creep.pos.getRangeTo(other);
+            if (range <= 3) {
+                return other;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Heal a target (ranged or adjacent)
+     */
+    healTarget(creep, target) {
+        const range = creep.pos.getRangeTo(target);
+
+        if (range <= 1) {
+            // Adjacent - heal directly
+            creep.heal(target);
+            creep.say('💚 heal');
+        } else if (range <= 3) {
+            // In range - ranged heal
+            creep.rangedHeal(target);
+            creep.say('💚 ranged');
+        } else {
+            // Move closer
+            creep.moveTo(target, {
+                visualizePathStyle: { stroke: '#00ff00' },
+                range: 1
+            });
+        }
+    }
+
+    /**
+     * Follow the closest attacker when no healing needed
+     */
+    followAttacker(creep, squad) {
+        // Find closest attacker in the room
+        let closestAttacker = null;
+        let closestRange = Infinity;
+
+        for (const name of squad.members.attackers) {
+            const attacker = Game.creeps[name];
+            if (!attacker || attacker.room.name !== creep.room.name) continue;
+
+            const range = creep.pos.getRangeTo(attacker);
+            if (range < closestRange) {
+                closestRange = range;
+                closestAttacker = attacker;
+            }
+        }
+
+        if (closestAttacker) {
+            // Stay 2 tiles behind the attacker
+            if (closestRange > 2) {
+                creep.moveTo(closestAttacker, {
+                    visualizePathStyle: { stroke: '#00ff00' },
+                    range: 2
+                });
+            }
+        } else {
+            // No attackers visible - move toward center of room
+            creep.moveTo(25, 25);
+        }
+    }
+
+    /**
+     * Travel to target room
+     */
+    travelToTarget(creep, targetRoom) {
+        const route = Game.map.findRoute(creep.room.name, targetRoom);
+        
+        if (route === ERR_NO_PATH) {
+            creep.say('❌ no path');
+            return;
+        }
+
+        if (route.length > 0) {
+            const exitDir = route[0].exit;
+            const exit = creep.pos.findClosestByPath(exitDir);
+            
+            if (exit) {
+                creep.moveTo(exit, {
+                    visualizePathStyle: { stroke: '#00ff00' }
+                });
+            }
+        }
+    }
+
+    /**
+     * Check if healer should retreat
+     */
+    shouldRetreat(creep) {
+        // Retreat if very low health
+        if (creep.hits < creep.hitsMax * 0.25) {
+            return true;
+        }
+
+        // Retreat if surrounded by enemies
+        const nearbyHostiles = creep.pos.findInRange(FIND_HOSTILE_CREEPS, 2);
+        if (nearbyHostiles.length >= 2) {
+            return true;
+        }
+
+        // Retreat if taking damage and no attackers nearby
+        if (creep.hits < creep.hitsMax * 0.5) {
+            const squad = Memory.attackSquads[creep.memory.squadId];
+            if (squad) {
+                let attackersNearby = 0;
+                for (const name of squad.members.attackers) {
+                    const attacker = Game.creeps[name];
+                    if (attacker && attacker.room.name === creep.room.name) {
+                        if (creep.pos.getRangeTo(attacker) <= 3) {
+                            attackersNearby++;
+                        }
+                    }
+                }
+                
+                if (attackersNearby === 0) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Retreat to safety
+     */
+    retreat(creep) {
+        // Try to find exit
+        const exit = creep.pos.findClosestByRange(FIND_EXIT);
+        
+        if (exit) {
+            creep.moveTo(exit, {
+                visualizePathStyle: { stroke: '#ffff00' }
+            });
+            creep.say('🏃 retreat');
+        }
+
+        // Keep self-healing while retreating
+        if (creep.body.some(p => p.type === HEAL && p.hits > 0)) {
+            creep.heal(creep);
+        }
+    }
+}
+
+// --- Scout.js ---
+/**
+ * Scout - Reconnaissance creep that explores rooms
+ * Moves room to room, gathering intelligence
+ * Saves room data to memory for attack planning
+ */
+class Scout {
+    run(creep) {
+        // Initialize scouting memory
+        if (!creep.memory.scouting) {
+            creep.memory.scouting = {
+                visitedRooms: [],
+                currentTarget: null,
+                path: [],
+                pathIndex: 0
+            };
+        }
+
+        // Scan current room and save data
+        this.scanRoom(creep);
+
+        // Get next target room to explore
+        if (!creep.memory.scouting.currentTarget || 
+            creep.room.name === creep.memory.scouting.currentTarget) {
+            this.selectNextTarget(creep);
+        }
+
+        // Move to target room
+        this.moveToTarget(creep);
+    }
+
+    /**
+     * Scan the current room and save intelligence
+     */
+    scanRoom(creep) {
+        const room = creep.room;
+        const roomName = room.name;
+
+        // Initialize room intel in memory if needed
+        if (!Memory.roomIntel) {
+            Memory.roomIntel = {};
+        }
+        if (!Memory.roomIntel[roomName]) {
+            Memory.roomIntel[roomName] = {};
+        }
+
+        const intel = {
+            lastScan: Game.time,
+            hasController: !!room.controller,
+            owner: null,
+            level: null,
+            safeMode: null,
+            structures: {},
+            creeps: {
+                hostile: 0,
+                friendly: 0
+            },
+            resources: {},
+            exits: {}
+        };
+
+        // Controller info
+        if (room.controller) {
+            intel.level = room.controller.level;
+            intel.owner = room.controller.owner ? room.controller.owner.username : null;
+            intel.reservation = room.controller.reservation ? {
+                username: room.controller.reservation.username,
+                ticksToEnd: room.controller.reservation.ticksToEnd
+            } : null;
+            intel.safeMode = room.controller.safeMode || null;
+        }
+
+        // Scan structures
+        const structures = room.find(FIND_STRUCTURES);
+        for (const structure of structures) {
+            const type = structure.structureType;
+            if (!intel.structures[type]) {
+                intel.structures[type] = [];
+            }
+            
+            intel.structures[type].push({
+                id: structure.id,
+                pos: { x: structure.pos.x, y: structure.pos.y },
+                hits: structure.hits,
+                hitsMax: structure.hitsMax,
+                my: structure.my || false
+            });
+        }
+
+        // Scan hostile creeps
+        const hostileCreeps = room.find(FIND_HOSTILE_CREEPS);
+        intel.creeps.hostile = hostileCreeps.length;
+        intel.creeps.hostileDetails = hostileCreeps.map(c => ({
+            id: c.id,
+            owner: c.owner.username,
+            bodyParts: c.body.length,
+            hits: c.hits,
+            hitsMax: c.hitsMax
+        }));
+
+        // Scan friendly creeps
+        const friendlyCreeps = room.find(FIND_MY_CREEPS);
+        intel.creeps.friendly = friendlyCreeps.length;
+
+        // Scan resources
+        const sources = room.find(FIND_SOURCES);
+        intel.resources.sources = sources.map(s => ({
+            id: s.id,
+            pos: { x: s.pos.x, y: s.pos.y },
+            energy: s.energy,
+            energyCapacity: s.energyCapacity
+        }));
+
+        const minerals = room.find(FIND_MINERALS);
+        intel.resources.minerals = minerals.map(m => ({
+            id: m.id,
+            pos: { x: m.pos.x, y: m.pos.y },
+            mineralType: m.mineralType,
+            density: m.density
+        }));
+
+        // Get exits
+        const exits = Game.map.describeExits(roomName);
+        intel.exits = exits;
+
+        // Save to memory
+        Memory.roomIntel[roomName] = intel;
+
+        // Visual feedback
+        creep.say(`👁️ ${roomName}`);
+    }
+
+    /**
+     * Select the next room to explore
+     */
+    selectNextTarget(creep) {
+        const currentRoom = creep.room.name;
+        const visited = creep.memory.scouting.visitedRooms;
+
+        // Add current room to visited
+        if (!visited.includes(currentRoom)) {
+            visited.push(currentRoom);
+        }
+
+        // Get all adjacent rooms
+        const exits = Game.map.describeExits(currentRoom);
+        const candidates = [];
+
+        for (const direction in exits) {
+            const roomName = exits[direction];
+            
+            // Skip if we've visited recently
+            if (visited.includes(roomName)) {
+                // Check if it's been a while since we visited
+                const intel = Memory.roomIntel[roomName];
+                if (intel && Game.time - intel.lastScan < 1000) {
+                    continue; // Visited recently
+                }
+            }
+
+            // Skip if room is not accessible (novice zone walls, etc.)
+            const status = Game.map.getRoomStatus(roomName);
+            if (status.status !== 'normal') {
+                continue;
+            }
+
+            candidates.push({
+                roomName: roomName,
+                direction: parseInt(direction),
+                lastScan: Memory.roomIntel[roomName]?.lastScan || 0
+            });
+        }
+
+        if (candidates.length === 0) {
+            // All adjacent rooms visited recently - reset and pick random
+            creep.memory.scouting.visitedRooms = [];
+            const exitDirections = Object.keys(exits);
+            if (exitDirections.length > 0) {
+                const randomDir = exitDirections[Math.floor(Math.random() * exitDirections.length)];
+                creep.memory.scouting.currentTarget = exits[randomDir];
+            }
+            return;
+        }
+
+        // Sort by last scan time (oldest first)
+        candidates.sort((a, b) => a.lastScan - b.lastScan);
+
+        // Pick the room least recently visited
+        creep.memory.scouting.currentTarget = candidates[0].roomName;
+        
+        // Reset path
+        creep.memory.scouting.path = [];
+        creep.memory.scouting.pathIndex = 0;
+    }
+
+    /**
+     * Move toward the target room
+     */
+    moveToTarget(creep) {
+        const targetRoom = creep.memory.scouting.currentTarget;
+        if (!targetRoom) return;
+
+        // Already there
+        if (creep.room.name === targetRoom) {
+            return;
+        }
+
+        // Find path to target room
+        const route = Game.map.findRoute(creep.room.name, targetRoom);
+        
+        if (route === ERR_NO_PATH) {
+            // Can't reach - mark as visited to skip
+            creep.memory.scouting.visitedRooms.push(targetRoom);
+            creep.memory.scouting.currentTarget = null;
+            creep.say('❌ blocked');
+            return;
+        }
+
+        if (route.length > 0) {
+            const exitDir = route[0].exit;
+            const exit = creep.pos.findClosestByPath(exitDir);
+            
+            if (exit) {
+                // Move toward exit
+                const result = creep.moveTo(exit, {
+                    visualizePathStyle: { stroke: '#ffffff' }
+                });
+
+                // If we have a path in memory, try to use it
+                if (creep.memory.scouting.path.length > 0) {
+                    const pathIndex = creep.memory.scouting.pathIndex;
+                    if (pathIndex < creep.memory.scouting.path.length) {
+                        const nextPos = creep.memory.scouting.path[pathIndex];
+                        const moveResult = creep.moveByPath(creep.memory.scouting.path);
+                        
+                        if (moveResult === OK) {
+                            creep.memory.scouting.pathIndex++;
+                        } else {
+                            // Path failed, clear it
+                            creep.memory.scouting.path = [];
+                            creep.memory.scouting.pathIndex = 0;
+                        }
+                    }
+                } else {
+                    // No path - search for one
+                    const search = PathFinder.search(
+                        creep.pos,
+                        { pos: exit, range: 0 },
+                        {
+                            roomCallback: (roomName) => {
+                                // Allow pathing through all rooms
+                                return new PathFinder.CostMatrix();
+                            }
+                        }
+                    );
+
+                    if (!search.incomplete && search.path.length > 0) {
+                        creep.memory.scouting.path = search.path;
+                        creep.memory.scouting.pathIndex = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Get intelligence summary for a room
+     * Used by other systems (attack planner, etc.)
+     */
+    static getRoomIntel(roomName) {
+        if (!Memory.roomIntel || !Memory.roomIntel[roomName]) {
+            return null;
+        }
+        return Memory.roomIntel[roomName];
+    }
+
+    /**
+     * Check if a room is owned by hostiles
+     */
+    static isHostileRoom(roomName) {
+        const intel = this.getRoomIntel(roomName);
+        if (!intel) return false;
+        
+        // Has controller with owner that's not us
+        if (intel.owner && intel.owner !== Game.spawns[Object.keys(Game.spawns)[0]].owner.username) {
+            return true;
+        }
+        
+        // Has hostile creeps
+        if (intel.creeps && intel.creeps.hostile > 0) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * Get list of hostile rooms
+     */
+    static getHostileRooms() {
+        const hostile = [];
+        if (!Memory.roomIntel) return hostile;
+        
+        for (const roomName in Memory.roomIntel) {
+            if (this.isHostileRoom(roomName)) {
+                hostile.push(roomName);
+            }
+        }
+        
+        return hostile;
+    }
+}
+
 // --- SourceManager.js ---
 /**
  * SourceManager - Manages stationary harvesting
@@ -3398,6 +4541,10 @@ class SpawnManager {
 }
 
 // --- RoomManager.js ---
+/**
+ * RoomManager - Manages owned rooms including defense, offense, and economy
+ * Handles military operations, room threats, and attack coordination
+ */
 class RoomManager {
     constructor() {
         this.spawnManager = new SpawnManager();
@@ -3405,6 +4552,15 @@ class RoomManager {
     }
     
     run() {
+        // Initialize military memory
+        if (!Memory.military) {
+            Memory.military = {
+                squads: {},
+                defense: {},
+                intel: {}
+            };
+        }
+        
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];
             
@@ -3412,6 +4568,9 @@ class RoomManager {
                 this.runOwnedRoom(room);
             }
         }
+        
+        // Manage attack squads globally
+        this.manageAttackSquads();
     }
     
     runOwnedRoom(room) {
@@ -3424,6 +4583,16 @@ class RoomManager {
             };
         }
         
+        // Initialize room-specific defense memory
+        if (!Memory.military.defense[room.name]) {
+            Memory.military.defense[room.name] = {
+                underAttack: false,
+                attackTimer: 0,
+                lastHostileSeen: 0,
+                defendersSpawned: 0
+            };
+        }
+        
         // Initialize remote room tracking
         if (!room.memory.remoteRooms) {
             room.memory.remoteRooms = [];
@@ -3432,17 +4601,316 @@ class RoomManager {
             room.memory.remoteAssignments = {};
         }
         
-        // Run spawn logic - spawn creeps for GCL and base building
+        // Check for threats and update defense status
+        this.updateDefenseStatus(room);
+        
+        // Run tower defense
+        this.runTowerDefense(room);
+        
+        // Run spawn logic
         this.spawnManager.run(room);
         
-        // Manage construction - build base structures
+        // Manage construction
         this.constructionManager.run(room);
         
-        // Manage remote rooms - scout and assign workers
+        // Manage remote rooms
         this.manageRemoteRooms(room);
         
         // Update room level tracking
         Memory.mokito.rooms[room.name].level = room.controller.level;
+    }
+    
+    /**
+     * Update room defense status and threat detection
+     */
+    updateDefenseStatus(room) {
+        const defense = Memory.military.defense[room.name];
+        
+        // Check for hostile creeps
+        const hostiles = room.find(FIND_HOSTILE_CREEPS);
+        
+        if (hostiles.length > 0) {
+            // Under attack!
+            defense.underAttack = true;
+            defense.attackTimer = 20; // Stay alert for 20 ticks after last hostile seen
+            defense.lastHostileSeen = Game.time;
+            
+            // Log first detection
+            if (!defense.alertLogged) {
+                console.log(`🚨 ROOM ${room.name} UNDER ATTACK! ${hostiles.length} hostiles detected!`);
+                defense.alertLogged = true;
+            }
+        } else {
+            // Decrement attack timer
+            if (defense.attackTimer > 0) {
+                defense.attackTimer--;
+            } else {
+                defense.underAttack = false;
+                defense.alertLogged = false;
+            }
+        }
+        
+        // Store needed defenders count
+        if (defense.underAttack) {
+            const neededDefenders = Math.min(hostiles.length * 2, 4); // 2 defenders per hostile, max 4
+            room.memory.neededDefenders = neededDefenders;
+        } else {
+            room.memory.neededDefenders = 0;
+        }
+    }
+    
+    /**
+     * Run tower defense logic
+     */
+    runTowerDefense(room) {
+        const towers = room.find(FIND_MY_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_TOWER
+        });
+        
+        if (towers.length === 0) return;
+        
+        // Find hostiles
+        const hostiles = room.find(FIND_HOSTILE_CREEPS);
+        
+        if (hostiles.length > 0) {
+            // Priority target: Healers > Ranged > Melee > Others
+            const priorityTargets = hostiles.sort((a, b) => {
+                const scoreA = this.getThreatScore(a);
+                const scoreB = this.getThreatScore(b);
+                return scoreB - scoreA; // Higher score first
+            });
+            
+            const target = priorityTargets[0];
+            
+            // Attack with all towers
+            for (const tower of towers) {
+                tower.attack(target);
+            }
+        } else {
+            // No hostiles - repair damaged structures
+            const damagedStructures = room.find(FIND_MY_STRUCTURES, {
+                filter: s => s.hits < s.hitsMax * 0.75 && s.structureType !== STRUCTURE_WALL && s.structureType !== STRUCTURE_RAMPART
+            });
+            
+            if (damagedStructures.length > 0) {
+                // Sort by damage percentage
+                damagedStructures.sort((a, b) => (a.hits / a.hitsMax) - (b.hits / b.hitsMax));
+                
+                for (const tower of towers) {
+                    if (tower.store.getUsedCapacity(RESOURCE_ENERGY) > tower.store.getCapacity(RESOURCE_ENERGY) * 0.5) {
+                        tower.repair(damagedStructures[0]);
+                    }
+                }
+            }
+            
+            // Repair walls/ramparts if enough energy
+            const defenseStructures = room.find(FIND_MY_STRUCTURES, {
+                filter: s => (s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART) && s.hits < 100000
+            });
+            
+            if (defenseStructures.length > 0 && towers[0].store.getUsedCapacity(RESOURCE_ENERGY) > towers[0].store.getCapacity(RESOURCE_ENERGY) * 0.8) {
+                defenseStructures.sort((a, b) => a.hits - b.hits);
+                for (const tower of towers) {
+                    if (tower.store.getUsedCapacity(RESOURCE_ENERGY) > tower.store.getCapacity(RESOURCE_ENERGY) * 0.8) {
+                        tower.repair(defenseStructures[0]);
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Calculate threat score for target prioritization
+     */
+    getThreatScore(creep) {
+        let score = 0;
+        
+        const body = creep.body;
+        const healParts = body.filter(p => p.type === HEAL && p.hits > 0).length;
+        const rangedParts = body.filter(p => p.type === RANGED_ATTACK && p.hits > 0).length;
+        const attackParts = body.filter(p => p.type === ATTACK && p.hits > 0).length;
+        const workParts = body.filter(p => p.type === WORK && p.hits > 0).length;
+        
+        // Healers are highest priority
+        score += healParts * 100;
+        // Then ranged attackers
+        score += rangedParts * 50;
+        // Then melee attackers
+        score += attackParts * 30;
+        // Workers last
+        score += workParts * 10;
+        
+        return score;
+    }
+    
+    /**
+     * Manage attack squads globally
+     */
+    manageAttackSquads() {
+        // Clean up dead squads
+        for (const squadId in Memory.military.squads) {
+            const squad = Memory.military.squads[squadId];
+            
+            // Check if squad members are alive
+            const aliveAttackers = squad.members.attackers.filter(name => Game.creeps[name]).length;
+            const aliveHealers = squad.members.healers.filter(name => Game.creeps[name]).length;
+            
+            // Squad is dead if no one is alive
+            if (aliveAttackers === 0 && aliveHealers === 0) {
+                console.log(`💀 Squad ${squadId} eliminated`);
+                delete Memory.military.squads[squadId];
+                continue;
+            }
+            
+            // Check for success
+            if (squad.status === 'success') {
+                console.log(`✅ Squad ${squadId} completed mission`);
+                delete Memory.military.squads[squadId];
+            }
+        }
+        
+        // Count active squads
+        const activeSquadCount = Object.keys(Memory.military.squads).length;
+        
+        // Request new squads if under max (3) and we have targets
+        if (activeSquadCount < 3) {
+            // Find hostile rooms from scout intel
+            const hostileRooms = this.getHostileRoomsFromIntel();
+            
+            for (const roomName of hostileRooms) {
+                // Check if already targeted by a squad
+                const alreadyTargeted = Object.values(Memory.military.squads).some(
+                    squad => squad.targetRoom === roomName
+                );
+                
+                if (!alreadyTargeted) {
+                    // Request a new squad
+                    this.requestAttackSquad(roomName);
+                    break; // Only request one squad per tick
+                }
+            }
+        }
+        
+        // Update needed squad members for spawning
+        this.updateNeededSquadMembers();
+    }
+    
+    /**
+     * Get list of hostile rooms from scout intelligence
+     */
+    getHostileRoomsFromIntel() {
+        if (!Memory.roomIntel) return [];
+        
+        const hostile = [];
+        const myUsername = Object.values(Game.spawns)[0]?.owner.username;
+        
+        for (const roomName in Memory.roomIntel) {
+            const intel = Memory.roomIntel[roomName];
+            
+            // Room has hostile controller owner
+            if (intel.owner && intel.owner !== myUsername) {
+                hostile.push(roomName);
+                continue;
+            }
+            
+            // Room has hostile creeps
+            if (intel.creeps && intel.creeps.hostile > 0) {
+                hostile.push(roomName);
+                continue;
+            }
+            
+            // Room has hostile structures
+            if (intel.structures && intel.structures.spawn) {
+                const hostileSpawns = intel.structures.spawn.filter(s => !s.my);
+                if (hostileSpawns.length > 0) {
+                    hostile.push(roomName);
+                }
+            }
+        }
+        
+        // Sort by last scan (most recent intel first)
+        hostile.sort((a, b) => {
+            const intelA = Memory.roomIntel[a];
+            const intelB = Memory.roomIntel[b];
+            return (intelB?.lastScan || 0) - (intelA?.lastScan || 0);
+        });
+        
+        return hostile;
+    }
+    
+    /**
+     * Request a new attack squad
+     */
+    requestAttackSquad(targetRoom) {
+        // Find a room to spawn from (closest to target)
+        let spawnRoom = null;
+        let closestDistance = Infinity;
+        
+        for (const roomName in Game.rooms) {
+            const room = Game.rooms[roomName];
+            if (room.controller && room.controller.my) {
+                const distance = Game.map.getRoomLinearDistance(roomName, targetRoom);
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    spawnRoom = roomName;
+                }
+            }
+        }
+        
+        if (!spawnRoom) return;
+        
+        const squadId = 'squad_' + Game.time;
+        
+        Memory.military.squads[squadId] = {
+            id: squadId,
+            targetRoom: targetRoom,
+            homeRoom: spawnRoom,
+            status: 'forming', // forming, ready, attacking, success
+            ready: false,
+            members: {
+                attackers: [],
+                healers: []
+            },
+            created: Game.time
+        };
+        
+        // Store in room memory for spawning
+        const room = Game.rooms[spawnRoom];
+        if (!room.memory.pendingSquads) {
+            room.memory.pendingSquads = [];
+        }
+        room.memory.pendingSquads.push(squadId);
+        
+        console.log(`🎖️ Attack squad ${squadId} requested for ${targetRoom}`);
+    }
+    
+    /**
+     * Update needed squad member counts for spawning
+     */
+    updateNeededSquadMembers() {
+        // Reset needed counts
+        for (const roomName in Game.rooms) {
+            const room = Game.rooms[roomName];
+            if (room.controller && room.controller.my) {
+                room.memory.neededAttackers = 0;
+                room.memory.neededHealers = 0;
+            }
+        }
+        
+        // Count needed members for forming squads
+        for (const squadId in Memory.military.squads) {
+            const squad = Memory.military.squads[squadId];
+            if (squad.ready) continue; // Squad is ready, no more needed
+            
+            const room = Game.rooms[squad.homeRoom];
+            if (!room) continue;
+            
+            const neededAttackers = Math.max(0, 3 - squad.members.attackers.length);
+            const neededHealers = Math.max(0, 1 - squad.members.healers.length);
+            
+            room.memory.neededAttackers += neededAttackers;
+            room.memory.neededHealers += neededHealers;
+        }
     }
     
     manageRemoteRooms(room) {
@@ -3579,11 +5047,13 @@ class RoomManager {
         const remoteHarvesters = creeps.filter(c => c.memory.role === 'remoteharvester').length;
         const haulers = creeps.filter(c => c.memory.role === 'hauler').length;
         const claimers = creeps.filter(c => c.memory.role === 'claimer').length;
+        const scouts = creeps.filter(c => c.memory.role === 'scout').length;
         
         // Calculate needed remote workers
         let neededRemoteHarvesters = 0;
         let neededHaulers = 0;
         let neededClaimers = 0;
+        let neededScouts = 0;
         
         for (const roomName of room.memory.remoteRooms) {
             const assignment = room.memory.remoteAssignments[roomName];
@@ -3612,10 +5082,16 @@ class RoomManager {
             }
         }
         
+        // Always want at least 1 scout if we don't have one
+        if (scouts < 1) {
+            neededScouts = 1;
+        }
+        
         // Store needed counts in memory for SpawnManager to use
         room.memory.neededRemoteHarvesters = neededRemoteHarvesters;
         room.memory.neededHaulers = neededHaulers;
         room.memory.neededClaimers = neededClaimers;
+        room.memory.neededScouts = neededScouts;
     }
 }
 
@@ -3630,7 +5106,11 @@ class CreepManager {
             runner: new Runner(),
             remoteharvester: new RemoteHarvester(),
             hauler: new Hauler(),
-            claimer: new Claimer()
+            claimer: new Claimer(),
+            defender: new Defender(),
+            attacker: new Attacker(),
+            healer: new Healer(),
+            scout: new Scout()
         };
     }
     

@@ -18,10 +18,21 @@ class MemoryManager {
             };
         }
         
+        // Initialize room memory structures
+        for (const roomName in Game.rooms) {
+            const room = Game.rooms[roomName];
+            if (room.controller && room.controller.my) {
+                if (!room.memory.spawnPriority) {
+                    room.memory.spawnPriority = [];
+                }
+            }
+        }
+        
         // Cleanup old memory
         for (const roomName in Memory.rooms) {
             if (!Game.rooms[roomName]) {
                 // Keep intel but remove runtime data
+                delete Memory.rooms[roomName].spawnPriority;
             }
         }
     }

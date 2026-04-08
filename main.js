@@ -2,7 +2,7 @@
 
 // ============================================
 // Mokito Bot - Combined Build
-// Built: 2026-04-08T10:20:37.458Z
+// Built: 2026-04-08T10:23:58.248Z
 // ============================================
 
 
@@ -1003,10 +1003,21 @@ class MemoryManager {
             };
         }
         
+        // Initialize room memory structures
+        for (const roomName in Game.rooms) {
+            const room = Game.rooms[roomName];
+            if (room.controller && room.controller.my) {
+                if (!room.memory.spawnPriority) {
+                    room.memory.spawnPriority = [];
+                }
+            }
+        }
+        
         // Cleanup old memory
         for (const roomName in Memory.rooms) {
             if (!Game.rooms[roomName]) {
                 // Keep intel but remove runtime data
+                delete Memory.rooms[roomName].spawnPriority;
             }
         }
     }
@@ -1321,6 +1332,10 @@ class SpawnManager {
         for (const source of sources) {
             totalSourcePositions += this.countOpenPositions(source);
         }
+        
+        // Update spawn priority info in room memory for heartbeat display
+        const nextSpawns = this.getNextSpawnPriority(room);
+        room.memory.spawnPriority = nextSpawns;
         
         // EMERGENCY MODE: Less than 2 harvesters
         // This is critical - we need energy production immediately
@@ -1667,6 +1682,187 @@ class SpawnManager {
         }
         return result;
     }
+
+    /**
+     * Get the next creep(s) that should be spawned based on current room state
+     * Returns an array of up to 2 next priority spawns
+     */
+    getNextSpawnPriority(room) {
+        const creeps = room.find(FIND_MY_CREEPS);
+        const harvesters = creeps.filter(c => c.memory.role === 'harvester');
+        const upgraders = creeps.filter(c => c.memory.role === 'upgrader');
+        const builders = creeps.filter(c => c.memory.role === 'builder');
+        const repairers = creeps.filter(c => c.memory.role === 'repairer');
+        const runners = creeps.filter(c => c.memory.role === 'runner');
+
+        const sources = room.find(FIND_SOURCES);
+        let totalSourcePositions = 0;
+        for (const source of sources) {
+            totalSourcePositions += this.countOpenPositions(source);
+        }
+
+        const priorities = [];
+
+        // EMERGENCY: Need harvesters immediately
+        if (harvesters.length < 2) {
+            priorities.push({
+                role: 'harvester',
+                emoji: '🌱',
+                reason: 'EMERGENCY: Only ' + harvesters.length + ' harvester(s)',
+                priority: 1
+            });
+            if (priorities.length >= 2) return priorities;
+            
+            if (harvesters.length < 2) {
+                priorities.push({
+                    role: 'harvester',
+                    emoji: '🌱',
+                    reason: 'Emergency backup',
+                    priority: 2
+                });
+                return priorities;
+            }
+        }
+
+        // PHASE 1: Initial startup - need 2 harvesters then 1 upgrader
+        if (harvesters.length < 2) {
+            priorities.push({
+                role: 'harvester',
+                emoji: '🌱',
+                reason: 'Need ' + (2 - harvesters.length) + ' more to reach 2',
+                priority: 1
+            });
+            if (priorities.length >= 2) return priorities;
+        } else if (harvesters.length === 2 && upgraders.length < 1) {
+            priorities.push({
+                role: 'upgrader',
+                emoji: '⚡',
+                reason: 'First upgrader needed',
+                priority: 1
+            });
+            if (priorities.length >= 2) return priorities;
+        }
+
+        // PHASE 2: Fill harvester positions
+        if (harvesters.length < totalSourcePositions) {
+            priorities.push({
+                role: 'harvester',
+                emoji: '🌱',
+                reason: harvesters.length + '/' + totalSourcePositions + ' positions filled',
+                priority: 1
+            });
+            if (priorities.length >= 2) return priorities;
+            
+            // Second harvester if still needed
+            if (harvesters.length + 1 < totalSourcePositions) {
+                priorities.push({
+                    role: 'harvester',
+                    emoji: '🌱',
+                    reason: 'Filling source positions',
+                    priority: 2
+                });
+                return priorities;
+            }
+        }
+
+        // PHASE 3 (Stationary Mode): Spawn Runners
+        if (harvesters.length >= totalSourcePositions) {
+            const desiredRunners = Math.ceil(harvesters.length / 2);
+            if (runners.length < desiredRunners) {
+                priorities.push({
+                    role: 'runner',
+                    emoji: '🏃',
+                    reason: runners.length + '/' + desiredRunners + ' runners needed',
+                    priority: 1
+                });
+                if (priorities.length >= 2) return priorities;
+                
+                if (runners.length + 1 < desiredRunners) {
+                    priorities.push({
+                        role: 'runner',
+                        emoji: '🏃',
+                        reason: 'Moving dropped energy',
+                        priority: 2
+                    });
+                    return priorities;
+                }
+            }
+
+            // PHASE 3: Spawn Upgraders
+            const desiredUpgraders = Math.max(1, harvesters.length);
+            if (upgraders.length < desiredUpgraders) {
+                priorities.push({
+                    role: 'upgrader',
+                    emoji: '⚡',
+                    reason: upgraders.length + '/' + desiredUpgraders + ' (1:1 ratio)',
+                    priority: 1
+                });
+                if (priorities.length >= 2) return priorities;
+                
+                if (upgraders.length + 1 < desiredUpgraders) {
+                    priorities.push({
+                        role: 'upgrader',
+                        emoji: '⚡',
+                        reason: 'Upgrading controller',
+                        priority: 2
+                    });
+                    return priorities;
+                }
+            }
+        }
+
+        // PHASE 4: Builders and Repairers
+        const maxBuilders = 3;
+        const maxRepairers = 4;
+        const idealBuilders = Math.ceil((builders.length + repairers.length) / 3);
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        
+        // Check if builder needed
+        if (builders.length < maxBuilders && builders.length < idealBuilders && sites.length > 0) {
+            priorities.push({
+                role: 'builder',
+                emoji: '🔨',
+                reason: builders.length + '/' + maxBuilders + ' builders, ' + sites.length + ' sites',
+                priority: 1
+            });
+            if (priorities.length >= 2) return priorities;
+        }
+        
+        // Check if repairer needed
+        const needsRepair = this.needsRepair(room);
+        if (repairers.length < maxRepairers && (needsRepair || repairers.length === 0)) {
+            if (repairers.length < builders.length * 2 || repairers.length === 0) {
+                priorities.push({
+                    role: 'repairer',
+                    emoji: '🔧',
+                    reason: repairers.length + '/' + maxRepairers + ' repairers',
+                    priority: priorities.length === 0 ? 1 : 2
+                });
+                if (priorities.length >= 2) return priorities;
+            }
+        }
+        
+        // If no specific needs, show what's at capacity
+        if (priorities.length === 0) {
+            if (room.memory.stationaryMode) {
+                priorities.push({
+                    role: 'upgrader',
+                    emoji: '⚡',
+                    reason: 'All creeps at capacity - spawning for upgrades',
+                    priority: 1
+                });
+            } else {
+                priorities.push({
+                    role: 'harvester',
+                    emoji: '🌱',
+                    reason: 'All positions filled - maintaining count',
+                    priority: 1
+                });
+            }
+        }
+
+        return priorities;
+    }
 }
 
 // --- RoomManager.js ---
@@ -1761,14 +1957,26 @@ class Mokito {
                 const harvesters = creeps.filter(c => c.memory.role === 'harvester').length;
                 const upgraders = creeps.filter(c => c.memory.role === 'upgrader').length;
                 const builders = creeps.filter(c => c.memory.role === 'builder').length;
+                const repairers = creeps.filter(c => c.memory.role === 'repairer').length;
+                const runners = creeps.filter(c => c.memory.role === 'runner').length;
                 const droppedEnergy = room.find(FIND_DROPPED_RESOURCES, {
                     filter: r => r.resourceType === RESOURCE_ENERGY
                 }).reduce((sum, r) => sum + r.amount, 0);
                 
-                console.log('💓 Mokito Heartbeat | Creeps: H:' + harvesters + ' U:' + upgraders + ' B:' + builders + 
+                // Get spawn priority info from room memory
+                let upNext = '';
+                const nextSpawns = room.memory.spawnPriority || [];
+                if (nextSpawns.length > 0) {
+                    upNext = ' | Next: ' + nextSpawns[0].emoji + ' ' + nextSpawns[0].role + ' (' + nextSpawns[0].reason + ')';
+                    if (nextSpawns.length > 1) {
+                        upNext += ' → ' + nextSpawns[1].emoji + ' ' + nextSpawns[1].role;
+                    }
+                }
+                
+                console.log('💓 Mokito | Creeps: H:' + harvesters + ' R:' + runners + ' U:' + upgraders + ' B:' + builders + ' Rp:' + repairers + 
                           ' | GCL:' + Game.gcl.level + 
                           ' | RCL:' + room.controller.level + 
-                          ' | Dropped:' + droppedEnergy);
+                          ' | Energy:' + droppedEnergy + upNext);
             }
         }
     }

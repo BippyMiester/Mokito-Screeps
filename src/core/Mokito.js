@@ -31,14 +31,26 @@ class Mokito {
                 const harvesters = creeps.filter(c => c.memory.role === 'harvester').length;
                 const upgraders = creeps.filter(c => c.memory.role === 'upgrader').length;
                 const builders = creeps.filter(c => c.memory.role === 'builder').length;
+                const repairers = creeps.filter(c => c.memory.role === 'repairer').length;
+                const runners = creeps.filter(c => c.memory.role === 'runner').length;
                 const droppedEnergy = room.find(FIND_DROPPED_RESOURCES, {
                     filter: r => r.resourceType === RESOURCE_ENERGY
                 }).reduce((sum, r) => sum + r.amount, 0);
                 
-                console.log('💓 Mokito Heartbeat | Creeps: H:' + harvesters + ' U:' + upgraders + ' B:' + builders + 
+                // Get spawn priority info from room memory
+                let upNext = '';
+                const nextSpawns = room.memory.spawnPriority || [];
+                if (nextSpawns.length > 0) {
+                    upNext = ' | Next: ' + nextSpawns[0].emoji + ' ' + nextSpawns[0].role + ' (' + nextSpawns[0].reason + ')';
+                    if (nextSpawns.length > 1) {
+                        upNext += ' → ' + nextSpawns[1].emoji + ' ' + nextSpawns[1].role;
+                    }
+                }
+                
+                console.log('💓 Mokito | Creeps: H:' + harvesters + ' R:' + runners + ' U:' + upgraders + ' B:' + builders + ' Rp:' + repairers + 
                           ' | GCL:' + Game.gcl.level + 
                           ' | RCL:' + room.controller.level + 
-                          ' | Dropped:' + droppedEnergy);
+                          ' | Energy:' + droppedEnergy + upNext);
             }
         }
     }

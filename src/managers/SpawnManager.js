@@ -8,7 +8,7 @@
  *   - Then spawn 1 upgrader (self-mines)
  * Phase 2 (Filling Harvesters):
  *   - Continue spawning harvesters until all source positions filled
- *   - Upgraders keep spawning (1 per 2 harvesters, minimum 1)
+ *   - Upgraders keep spawning (1:1 ratio with harvesters, minimum 1)
  * Phase 3 (Stationary Mode):
  *   - Once harvesters >= source positions, switch to stationary mode
  *   - Harvesters drop energy at sources
@@ -110,8 +110,8 @@ class SpawnManager {
         }
 
         // PHASE 3: Fill upgrader positions
-        // Calculate desired upgraders: 1 per 2 harvesters, minimum 1
-        const desiredUpgraders = Math.max(1, Math.ceil(harvesters.length / 2));
+        // Calculate desired upgraders: 1 per 1 harvester (1:1 ratio), minimum 1
+        const desiredUpgraders = Math.max(1, harvesters.length);
         if (upgraders.length < desiredUpgraders) {
             const bodyCost = this.getUpgraderCost(energyCapacity);
             if (energyAvailable >= bodyCost) {

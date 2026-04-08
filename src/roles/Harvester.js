@@ -85,8 +85,33 @@ class Harvester {
             // Deliver to spawn
             const target = this.findDeliveryTarget(creep);
             if (target) {
-                if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+                const result = creep.transfer(target, RESOURCE_ENERGY);
+                if (result === ERR_NOT_IN_RANGE) {
                     creep.moveTo(target);
+                } else if (result === ERR_FULL) {
+                    // Target is full, try to find another target
+                    creep.say('🚫 full');
+                    // Clear any cached target so we find a new one next tick
+                } else if (result === OK) {
+                    // Transfer successful
+                    if (creep.store[RESOURCE_ENERGY] === 0) {
+                        creep.memory.delivering = false;
+                        creep.say('⛏️ harvest');
+                    }
+                }
+            } else {
+                // No target available - spawn/extensions are full
+                // Wait near spawn or drop energy on ground
+                const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
+                if (spawn) {
+                    if (!creep.pos.inRangeTo(spawn, 3)) {
+                        creep.moveTo(spawn, { range: 3 });
+                    } else {
+                        // Near spawn but it's full - drop energy so we can keep harvesting
+                        creep.drop(RESOURCE_ENERGY);
+                        creep.say('💧 drop');
+                        creep.memory.delivering = false;
+                    }
                 }
             }
         } else {
@@ -95,6 +120,12 @@ class Harvester {
             if (source) {
                 if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
                     creep.moveTo(source);
+                }
+            } else {
+                // No source assigned, find one
+                const sources = creep.room.find(FIND_SOURCES);
+                if (sources.length > 0) {
+                    creep.memory.sourceId = sources[0].id;
                 }
             }
         }

@@ -3,6 +3,7 @@
 /**
  * Builder - Builds construction sites
  * Priority: Dropped energy > Containers/Storage > Self-mining
+ * Idle behavior: Upgrades controller
  * NEVER takes from spawn - keeps spawn energy for creep spawning
  */
 class Builder {
@@ -100,8 +101,13 @@ class Builder {
                 }
             }
         } else {
-            // No construction sites - repair roads or walls
-            this.repair(creep);
+            // No construction sites - repair roads or containers
+            const didRepair = this.repair(creep);
+            
+            // If nothing to repair either, upgrade controller as idle behavior
+            if (!didRepair) {
+                this.upgradeController(creep);
+            }
         }
     }
 
@@ -116,10 +122,30 @@ class Builder {
             if (creep.repair(target) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(target);
             }
-        } else {
-            // Nothing to repair - idle
-            creep.say('⏳ idle');
+            return true; // Found something to repair
         }
+        
+        return false; // Nothing to repair
+    }
+
+    upgradeController(creep) {
+        // When idle (no construction sites or repairs needed), upgrade controller
+        const controller = creep.room.controller;
+        if (!controller) return false;
+
+        const result = creep.upgradeController(controller);
+
+        if (result === ERR_NOT_IN_RANGE) {
+            creep.moveTo(controller, {
+                visualizePathStyle: { stroke: '#ffffff' }
+            });
+        } else if (result === OK) {
+            if (Game.time % 10 === 0) {
+                creep.say('⚡ ' + creep.store[RESOURCE_ENERGY]);
+            }
+        }
+        
+        return true;
     }
 }
 

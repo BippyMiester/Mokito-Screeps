@@ -2,7 +2,7 @@
 
 // ============================================
 // Mokito Bot - Combined Build
-// Built: 2026-04-08T10:26:45.704Z
+// Built: 2026-04-08T10:30:23.701Z
 // ============================================
 
 
@@ -416,7 +416,14 @@ class Runner {
             return;
         }
 
-        // If no energy available, wait near sources
+        // If no energy available, check if we have energy to upgrade controller
+        if (creep.store[RESOURCE_ENERGY] > 0) {
+            // Have energy but nothing to collect - upgrade as idle behavior
+            this.upgradeController(creep);
+            return;
+        }
+        
+        // No energy to collect and no energy stored - wait near sources
         const sources = creep.room.find(FIND_SOURCES);
         if (sources.length > 0) {
             // Find source with most dropped energy nearby
@@ -527,6 +534,24 @@ class Runner {
             creep.say('🔍 collect');
         }
     }
+
+    // Idle behavior: Upgrade controller when nothing to deliver
+    upgradeController(creep) {
+        const controller = creep.room.controller;
+        if (!controller) return;
+
+        const result = creep.upgradeController(controller);
+
+        if (result === ERR_NOT_IN_RANGE) {
+            creep.moveTo(controller, {
+                visualizePathStyle: { stroke: '#ffffff' }
+            });
+        } else if (result === OK) {
+            if (Game.time % 10 === 0) {
+                creep.say('⚡ ' + creep.store[RESOURCE_ENERGY]);
+            }
+        }
+    }
 }
 
 // --- Upgrader.js ---
@@ -626,6 +651,7 @@ class Upgrader {
 /**
  * Builder - Builds construction sites
  * Priority: Dropped energy > Containers/Storage > Self-mining
+ * Idle behavior: Upgrades controller
  * NEVER takes from spawn - keeps spawn energy for creep spawning
  */
 class Builder {
@@ -723,8 +749,13 @@ class Builder {
                 }
             }
         } else {
-            // No construction sites - repair roads or walls
-            this.repair(creep);
+            // No construction sites - repair roads or containers
+            const didRepair = this.repair(creep);
+            
+            // If nothing to repair either, upgrade controller as idle behavior
+            if (!didRepair) {
+                this.upgradeController(creep);
+            }
         }
     }
 
@@ -739,10 +770,30 @@ class Builder {
             if (creep.repair(target) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(target);
             }
-        } else {
-            // Nothing to repair - idle
-            creep.say('⏳ idle');
+            return true; // Found something to repair
         }
+        
+        return false; // Nothing to repair
+    }
+
+    upgradeController(creep) {
+        // When idle (no construction sites or repairs needed), upgrade controller
+        const controller = creep.room.controller;
+        if (!controller) return false;
+
+        const result = creep.upgradeController(controller);
+
+        if (result === ERR_NOT_IN_RANGE) {
+            creep.moveTo(controller, {
+                visualizePathStyle: { stroke: '#ffffff' }
+            });
+        } else if (result === OK) {
+            if (Game.time % 10 === 0) {
+                creep.say('⚡ ' + creep.store[RESOURCE_ENERGY]);
+            }
+        }
+        
+        return true;
     }
 }
 
@@ -750,6 +801,7 @@ class Builder {
 /**
  * Repairer - Repairs structures (roads, containers, ramparts, walls)
  * Priority: Dropped energy > Containers/Storage > Self-mining
+ * Idle behavior: Upgrades controller
  * NEVER takes from spawn - keeps spawn energy for creep spawning
  */
 class Repairer {
@@ -875,8 +927,25 @@ class Repairer {
             return;
         }
 
-        // Nothing to repair - help with building
-        creep.say('⏳ idle');
+        // Nothing to repair - upgrade controller as idle behavior
+        this.upgradeController(creep);
+    }
+
+    upgradeController(creep) {
+        const controller = creep.room.controller;
+        if (!controller) return;
+
+        const result = creep.upgradeController(controller);
+
+        if (result === ERR_NOT_IN_RANGE) {
+            creep.moveTo(controller, {
+                visualizePathStyle: { stroke: '#ffffff' }
+            });
+        } else if (result === OK) {
+            if (Game.time % 10 === 0) {
+                creep.say('⚡ ' + creep.store[RESOURCE_ENERGY]);
+            }
+        }
     }
 }
 

@@ -82,7 +82,14 @@ class Runner {
             return;
         }
 
-        // If no energy available, wait near sources
+        // If no energy available, check if we have energy to upgrade controller
+        if (creep.store[RESOURCE_ENERGY] > 0) {
+            // Have energy but nothing to collect - upgrade as idle behavior
+            this.upgradeController(creep);
+            return;
+        }
+        
+        // No energy to collect and no energy stored - wait near sources
         const sources = creep.room.find(FIND_SOURCES);
         if (sources.length > 0) {
             // Find source with most dropped energy nearby
@@ -191,6 +198,24 @@ class Runner {
             // No energy to deliver, go collect
             creep.memory.delivering = false;
             creep.say('🔍 collect');
+        }
+    }
+
+    // Idle behavior: Upgrade controller when nothing to deliver
+    upgradeController(creep) {
+        const controller = creep.room.controller;
+        if (!controller) return;
+
+        const result = creep.upgradeController(controller);
+
+        if (result === ERR_NOT_IN_RANGE) {
+            creep.moveTo(controller, {
+                visualizePathStyle: { stroke: '#ffffff' }
+            });
+        } else if (result === OK) {
+            if (Game.time % 10 === 0) {
+                creep.say('⚡ ' + creep.store[RESOURCE_ENERGY]);
+            }
         }
     }
 }

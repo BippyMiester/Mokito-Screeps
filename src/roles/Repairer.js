@@ -3,6 +3,7 @@
 /**
  * Repairer - Repairs structures (roads, containers, ramparts, walls)
  * Priority: Dropped energy > Containers/Storage > Self-mining
+ * Idle behavior: Upgrades controller
  * NEVER takes from spawn - keeps spawn energy for creep spawning
  */
 class Repairer {
@@ -128,8 +129,25 @@ class Repairer {
             return;
         }
 
-        // Nothing to repair - help with building
-        creep.say('⏳ idle');
+        // Nothing to repair - upgrade controller as idle behavior
+        this.upgradeController(creep);
+    }
+
+    upgradeController(creep) {
+        const controller = creep.room.controller;
+        if (!controller) return;
+
+        const result = creep.upgradeController(controller);
+
+        if (result === ERR_NOT_IN_RANGE) {
+            creep.moveTo(controller, {
+                visualizePathStyle: { stroke: '#ffffff' }
+            });
+        } else if (result === OK) {
+            if (Game.time % 10 === 0) {
+                creep.say('⚡ ' + creep.store[RESOURCE_ENERGY]);
+            }
+        }
     }
 }
 

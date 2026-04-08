@@ -2,7 +2,7 @@
 
 // ============================================
 // Mokito Bot - Combined Build
-// Built: 2026-04-08T09:47:20.733Z
+// Built: 2026-04-08T10:01:46.406Z
 // ============================================
 
 
@@ -238,8 +238,9 @@ class Harvester {
 
 // --- Upgrader.js ---
 /**
- * Upgrader - Picks up dropped energy from harvesters and upgrades controller
- * Does NOT mine - only collects dropped energy
+ * Upgrader - Upgrades room controller
+ * Priority: Dropped energy > Containers/Storage > Self-mining
+ * NEVER takes from spawn - keeps spawn energy for creep spawning
  */
 class Upgrader {
     run(creep) {
@@ -291,27 +292,21 @@ class Upgrader {
             return;
         }
 
-        // Priority 3: Spawn (emergency only)
-        const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS, {
-            filter: (s) => s.store[RESOURCE_ENERGY] > 200
-        });
-
-        if (spawn) {
-            if (creep.withdraw(spawn, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(spawn);
+        // Priority 3: Mine energy yourself (if stationary harvesters not available)
+        // Upgraders should NOT take from spawn - only from ground or containers
+        const source = creep.pos.findClosestByPath(FIND_SOURCES);
+        if (source) {
+            if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(source, {
+                    visualizePathStyle: { stroke: '#ffaa00' }
+                });
             }
+            creep.say('⛏️ mine');
             return;
         }
 
-        // If no energy available, wait near sources
-        const sources = creep.room.find(FIND_SOURCES);
-        if (sources.length > 0) {
-            creep.moveTo(sources[0], {
-                range: 3,
-                visualizePathStyle: { stroke: '#ffaa00' }
-            });
-            creep.say('⏳ waiting');
-        }
+        // If no sources available, wait
+        creep.say('⏳ waiting');
     }
 
     upgradeController(creep) {
@@ -335,8 +330,9 @@ class Upgrader {
 
 // --- Builder.js ---
 /**
- * Builder - Picks up dropped energy and builds construction sites
- * Does NOT mine - only collects dropped energy
+ * Builder - Builds construction sites
+ * Priority: Dropped energy > Containers/Storage > Self-mining
+ * NEVER takes from spawn - keeps spawn energy for creep spawning
  */
 class Builder {
     run(creep) {
@@ -388,27 +384,21 @@ class Builder {
             return;
         }
 
-        // Priority 3: Spawn (emergency only)
-        const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS, {
-            filter: (s) => s.store[RESOURCE_ENERGY] > 200
-        });
-
-        if (spawn) {
-            if (creep.withdraw(spawn, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(spawn);
+        // Priority 3: Mine energy yourself (if stationary harvesters not available)
+        // Builders should NOT take from spawn - only from ground or containers
+        const source = creep.pos.findClosestByPath(FIND_SOURCES);
+        if (source) {
+            if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(source, {
+                    visualizePathStyle: { stroke: '#ffaa00' }
+                });
             }
+            creep.say('⛏️ mine');
             return;
         }
 
-        // If no energy available, wait near sources
-        const sources = creep.room.find(FIND_SOURCES);
-        if (sources.length > 0) {
-            creep.moveTo(sources[0], {
-                range: 3,
-                visualizePathStyle: { stroke: '#ffaa00' }
-            });
-            creep.say('⏳ waiting');
-        }
+        // If no sources available, wait
+        creep.say('⏳ waiting');
     }
 
     build(creep) {
@@ -454,7 +444,8 @@ class Builder {
 // --- Repairer.js ---
 /**
  * Repairer - Repairs structures (roads, containers, ramparts, walls)
- * Picks up dropped energy from ground
+ * Priority: Dropped energy > Containers/Storage > Self-mining
+ * NEVER takes from spawn - keeps spawn energy for creep spawning
  */
 class Repairer {
     run(creep) {
@@ -502,15 +493,14 @@ class Repairer {
             return;
         }
 
-        // Priority 3: Spawn
-        const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS, {
-            filter: s => s.store[RESOURCE_ENERGY] > 200
-        });
-
-        if (spawn) {
-            if (creep.withdraw(spawn, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(spawn);
+        // Priority 3: Mine energy yourself (if stationary harvesters not available)
+        // Repairers should NOT take from spawn - only from ground or containers
+        const source = creep.pos.findClosestByPath(FIND_SOURCES);
+        if (source) {
+            if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(source);
             }
+            creep.say('⛏️ mine');
             return;
         }
 

@@ -5,6 +5,9 @@ const Upgrader = require('../roles/Upgrader');
 const Builder = require('../roles/Builder');
 const Repairer = require('../roles/Repairer');
 const Runner = require('../roles/Runner');
+const RemoteHarvester = require('../roles/RemoteHarvester');
+const Hauler = require('../roles/Hauler');
+const Claimer = require('../roles/Claimer');
 
 class CreepManager {
     constructor() {
@@ -13,7 +16,10 @@ class CreepManager {
             upgrader: new Upgrader(),
             builder: new Builder(),
             repairer: new Repairer(),
-            runner: new Runner()
+            runner: new Runner(),
+            remoteharvester: new RemoteHarvester(),
+            hauler: new Hauler(),
+            claimer: new Claimer()
         };
     }
     

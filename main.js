@@ -2,7 +2,7 @@
 
 // ============================================
 // Mokito Bot - Combined Build
-// Built: 2026-04-08T10:39:29.457Z
+// Built: 2026-04-08T10:46:09.588Z
 // ============================================
 
 
@@ -1427,6 +1427,575 @@ class Repairer {
     }
 }
 
+// --- RemoteHarvester.js ---
+/**
+ * RemoteHarvester - Mines energy from sources in remote rooms
+ * Travels to target room, builds a container near source, and mines
+ * Places energy in container for haulers to collect
+ */
+class RemoteHarvester {
+    run(creep) {
+        // Initialize if needed
+        if (!creep.memory.remoteRoom) {
+            this.assignRemoteRoom(creep);
+        }
+        
+        // State management
+        if (creep.memory.buildingContainer && creep.store[RESOURCE_ENERGY] === 0) {
+            creep.memory.buildingContainer = false;
+        }
+        if (!creep.memory.buildingContainer && creep.store.getFreeCapacity() === 0) {
+            // Check if we need to build container first
+            if (!creep.memory.containerBuilt) {
+                creep.memory.buildingContainer = true;
+            }
+        }
+        
+        // If in home room, travel to remote room
+        if (creep.room.name !== creep.memory.remoteRoom) {
+            this.travelToRemoteRoom(creep);
+            return;
+        }
+        
+        // In remote room
+        if (creep.memory.buildingContainer && !creep.memory.containerBuilt) {
+            this.buildContainer(creep);
+        } else {
+            this.harvestAndStore(creep);
+        }
+    }
+    
+    assignRemoteRoom(creep) {
+        // Get remote mining assignments from room memory
+        const homeRoom = Game.rooms[creep.memory.homeRoom];
+        if (!homeRoom) return;
+        
+        const remoteAssignments = homeRoom.memory.remoteAssignments || {};
+        
+        // Find an unassigned source
+        for (const roomName in remoteAssignments) {
+            const sources = remoteAssignments[roomName];
+            for (const sourceId in sources) {
+                if (!sources[sourceId].harvester) {
+                    creep.memory.remoteRoom = roomName;
+                    creep.memory.sourceId = sourceId;
+                    sources[sourceId].harvester = creep.name;
+                    return;
+                }
+            }
+        }
+        
+        // No assignment found
+        creep.say('❌ no assign');
+    }
+    
+    travelToRemoteRoom(creep) {
+        const remoteRoom = creep.memory.remoteRoom;
+        if (!remoteRoom) return;
+        
+        // Move to exit
+        const exitDir = Game.map.findExit(creep.room, remoteRoom);
+        if (exitDir === ERR_NO_PATH) {
+            creep.say('❌ no path');
+            return;
+        }
+        
+        const exit = creep.pos.findClosestByPath(exitDir);
+        if (exit) {
+            creep.moveTo(exit, {
+                visualizePathStyle: { stroke: '#ffaa00' }
+            });
+        }
+    }
+    
+    buildContainer(creep) {
+        const source = Game.getObjectById(creep.memory.sourceId);
+        if (!source) {
+            // Try to find source in room
+            const sources = creep.room.find(FIND_SOURCES);
+            if (sources.length > 0) {
+                // Find closest to memory position
+                const targetSource = sources.find(s => s.id === creep.memory.sourceId);
+                if (targetSource) {
+                    this.constructContainer(creep, targetSource);
+                }
+            }
+            return;
+        }
+        
+        this.constructContainer(creep, source);
+    }
+    
+    constructContainer(creep, source) {
+        // Check if container already exists near source
+        const containers = source.pos.findInRange(FIND_STRUCTURES, 2, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER
+        });
+        
+        if (containers.length > 0) {
+            creep.memory.containerBuilt = true;
+            creep.memory.containerId = containers[0].id;
+            return;
+        }
+        
+        // Check for construction site
+        const sites = source.pos.findInRange(FIND_CONSTRUCTION_SITES, 2, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER
+        });
+        
+        if (sites.length > 0) {
+            // Build existing site
+            if (creep.store[RESOURCE_ENERGY] > 0) {
+                if (creep.build(sites[0]) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(sites[0]);
+                }
+            } else {
+                // Need energy - harvest from source
+                if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(source);
+                }
+            }
+        } else {
+            // Create construction site
+            // Find best position near source
+            const pos = this.findContainerPosition(source);
+            if (pos) {
+                const result = pos.createConstructionSite(STRUCTURE_CONTAINER);
+                if (result === OK) {
+                    creep.say('📦 container');
+                }
+            }
+        }
+    }
+    
+    findContainerPosition(source) {
+        const room = source.room;
+        const terrain = room.getTerrain();
+        
+        // Find position adjacent to source with no walls
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                
+                const x = source.pos.x + dx;
+                const y = source.pos.y + dy;
+                
+                if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+                if (terrain.get(x, y) !== TERRAIN_MASK_WALL) {
+                    const pos = new RoomPosition(x, y, room.name);
+                    // Check for existing structures
+                    const structures = pos.lookFor(LOOK_STRUCTURES);
+                    if (structures.length === 0) {
+                        return pos;
+                    }
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    harvestAndStore(creep) {
+        const source = Game.getObjectById(creep.memory.sourceId);
+        if (!source) {
+            creep.say('❌ no source');
+            return;
+        }
+        
+        // Get container
+        let container = Game.getObjectById(creep.memory.containerId);
+        
+        // If container doesn't exist, try to find it
+        if (!container) {
+            const containers = source.pos.findInRange(FIND_STRUCTURES, 2, {
+                filter: s => s.structureType === STRUCTURE_CONTAINER
+            });
+            if (containers.length > 0) {
+                container = containers[0];
+                creep.memory.containerId = container.id;
+            } else {
+                // Need to build container
+                creep.memory.buildingContainer = true;
+                creep.memory.containerBuilt = false;
+                return;
+            }
+        }
+        
+        // If full, repair container if needed
+        if (creep.store.getFreeCapacity() === 0) {
+            if (container.hits < container.hitsMax * 0.8) {
+                if (creep.repair(container) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(container);
+                }
+            }
+            return;
+        }
+        
+        // Harvest
+        const result = creep.harvest(source);
+        
+        if (result === ERR_NOT_IN_RANGE) {
+            creep.moveTo(source);
+        } else if (result === OK) {
+            // Drop energy into container
+            if (creep.store.getFreeCapacity() === 0) {
+                const energy = creep.store[RESOURCE_ENERGY];
+                creep.drop(RESOURCE_ENERGY);
+                creep.say('💧 ' + energy);
+            }
+        } else if (result === ERR_NOT_ENOUGH_RESOURCES) {
+            // Source empty, wait
+            creep.say('⏳ wait');
+        }
+    }
+}
+
+// --- Hauler.js ---
+/**
+ * Hauler - Transports energy from remote rooms to home room
+ * Collects from containers built by RemoteHarvesters
+ * Delivers to home room storage or spawn
+ */
+class Hauler {
+    run(creep) {
+        // Initialize if needed
+        if (!creep.memory.remoteRoom) {
+            this.assignRemoteRoom(creep);
+        }
+        
+        // State management
+        if (creep.memory.collecting && creep.store.getFreeCapacity() === 0) {
+            creep.memory.collecting = false;
+            creep.say('🏠 deliver');
+        }
+        if (!creep.memory.collecting && creep.store[RESOURCE_ENERGY] === 0) {
+            creep.memory.collecting = true;
+            creep.say('📦 collect');
+        }
+        
+        if (creep.memory.collecting) {
+            this.collectEnergy(creep);
+        } else {
+            this.deliverEnergy(creep);
+        }
+    }
+    
+    assignRemoteRoom(creep) {
+        const homeRoom = Game.rooms[creep.memory.homeRoom];
+        if (!homeRoom) return;
+        
+        const remoteAssignments = homeRoom.memory.remoteAssignments || {};
+        
+        // Find a remote room that needs a hauler
+        for (const roomName in remoteAssignments) {
+            const sources = remoteAssignments[roomName];
+            let needsHauler = false;
+            
+            for (const sourceId in sources) {
+                if (sources[sourceId].harvester && !sources[sourceId].hauler) {
+                    needsHauler = true;
+                    break;
+                }
+            }
+            
+            if (needsHauler) {
+                creep.memory.remoteRoom = roomName;
+                // Assign to first source that needs a hauler
+                for (const sourceId in sources) {
+                    if (sources[sourceId].harvester && !sources[sourceId].hauler) {
+                        creep.memory.sourceId = sourceId;
+                        creep.memory.containerId = sources[sourceId].containerId;
+                        sources[sourceId].hauler = creep.name;
+                        return;
+                    }
+                }
+            }
+        }
+        
+        creep.say('❌ no assign');
+    }
+    
+    collectEnergy(creep) {
+        // If in home room, travel to remote room
+        if (creep.room.name !== creep.memory.remoteRoom) {
+            this.travelToRoom(creep, creep.memory.remoteRoom);
+            return;
+        }
+        
+        // In remote room - collect from container
+        const container = Game.getObjectById(creep.memory.containerId);
+        
+        if (!container) {
+            // Try to find container
+            const source = Game.getObjectById(creep.memory.sourceId);
+            if (source) {
+                const containers = source.pos.findInRange(FIND_STRUCTURES, 2, {
+                    filter: s => s.structureType === STRUCTURE_CONTAINER
+                });
+                if (containers.length > 0) {
+                    creep.memory.containerId = containers[0].id;
+                    this.withdrawFromContainer(creep, containers[0]);
+                } else {
+                    creep.say('❌ no container');
+                }
+            }
+            return;
+        }
+        
+        this.withdrawFromContainer(creep, container);
+    }
+    
+    withdrawFromContainer(creep, container) {
+        // Check if container has energy
+        if (container.store[RESOURCE_ENERGY] <= 0) {
+            // Wait for energy
+            creep.say('⏳ wait');
+            return;
+        }
+        
+        // Withdraw energy
+        const result = creep.withdraw(container, RESOURCE_ENERGY);
+        
+        if (result === ERR_NOT_IN_RANGE) {
+            creep.moveTo(container, {
+                visualizePathStyle: { stroke: '#ffaa00' }
+            });
+        } else if (result === OK) {
+            // Continue withdrawing until full
+            if (creep.store.getFreeCapacity() > 0 && container.store[RESOURCE_ENERGY] > 0) {
+                // Will continue next tick
+            } else {
+                creep.memory.collecting = false;
+                creep.say('🏠 deliver');
+            }
+        }
+    }
+    
+    deliverEnergy(creep) {
+        // If in remote room, travel home
+        if (creep.room.name === creep.memory.remoteRoom) {
+            this.travelToRoom(creep, creep.memory.homeRoom);
+            return;
+        }
+        
+        // In home room - deliver energy
+        const homeRoom = Game.rooms[creep.memory.homeRoom];
+        if (!homeRoom) {
+            // Wait until we get to home room
+            return;
+        }
+        
+        // Find delivery target
+        const target = this.findDeliveryTarget(homeRoom, creep);
+        
+        if (target) {
+            const result = creep.transfer(target, RESOURCE_ENERGY);
+            
+            if (result === ERR_NOT_IN_RANGE) {
+                creep.moveTo(target, {
+                    visualizePathStyle: { stroke: '#ffffff' }
+                });
+            } else if (result === OK) {
+                if (creep.store[RESOURCE_ENERGY] === 0) {
+                    creep.memory.collecting = true;
+                    creep.say('📦 collect');
+                }
+            }
+        } else {
+            // No target - wait near spawn
+            const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
+            if (spawn) {
+                creep.moveTo(spawn, { range: 3 });
+            }
+        }
+    }
+    
+    findDeliveryTarget(room, creep) {
+        // Priority: Storage > Extensions > Spawn > Container
+        
+        const storage = room.find(FIND_MY_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_STORAGE &&
+                        s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+        })[0];
+        if (storage) return storage;
+        
+        const extensions = room.find(FIND_MY_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_EXTENSION &&
+                        s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+        });
+        if (extensions.length > 0) {
+            return creep.pos.findClosestByPath(extensions);
+        }
+        
+        const spawn = room.find(FIND_MY_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_SPAWN &&
+                        s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+        })[0];
+        if (spawn) return spawn;
+        
+        const containers = room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER &&
+                        s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+        });
+        if (containers.length > 0) {
+            return creep.pos.findClosestByPath(containers);
+        }
+        
+        return null;
+    }
+    
+    travelToRoom(creep, roomName) {
+        const exitDir = Game.map.findExit(creep.room, roomName);
+        if (exitDir === ERR_NO_PATH) {
+            creep.say('❌ no path');
+            return;
+        }
+        
+        // Use RoomPosition to find path to target room
+        const route = Game.map.findRoute(creep.room.name, roomName);
+        if (route !== ERR_NO_PATH && route.length > 0) {
+            const exit = creep.pos.findClosestByPath(route[0].exit);
+            if (exit) {
+                creep.moveTo(exit, {
+                    visualizePathStyle: { stroke: '#00ff00' }
+                });
+            }
+        }
+    }
+}
+
+// --- Claimer.js ---
+/**
+ * Claimer - Reserves controller in remote rooms to prevent decay
+ * Travels to target room and reserves controller
+ * Returns home when TTL is low to be recycled
+ */
+class Claimer {
+    run(creep) {
+        // Initialize if needed
+        if (!creep.memory.targetRoom) {
+            this.assignTargetRoom(creep);
+        }
+        
+        // Check TTL - return home if low
+        if (creep.ticksToLive <= 100 && creep.room.name !== creep.memory.homeRoom) {
+            this.travelHome(creep);
+            return;
+        }
+        
+        // Check if we need to travel to target room
+        if (creep.room.name !== creep.memory.targetRoom) {
+            this.travelToRoom(creep, creep.memory.targetRoom);
+            return;
+        }
+        
+        // In target room - reserve controller
+        const controller = creep.room.controller;
+        
+        if (!controller) {
+            creep.say('❌ no ctrl');
+            return;
+        }
+        
+        // Reserve controller
+        const result = creep.reserveController(controller);
+        
+        if (result === ERR_NOT_IN_RANGE) {
+            creep.moveTo(controller, {
+                visualizePathStyle: { stroke: '#ffaa00' }
+            });
+        } else if (result === OK) {
+            creep.say('🔒 reserved');
+        } else if (result === ERR_INVALID_TARGET) {
+            // Controller might be owned by someone else
+            creep.say('❌ owned');
+        } else if (result === ERR_NO_BODYPART) {
+            // No claim parts
+            creep.say('❌ no parts');
+        }
+    }
+    
+    assignTargetRoom(creep) {
+        const homeRoom = Game.rooms[creep.memory.homeRoom];
+        if (!homeRoom) return;
+        
+        const remoteRooms = homeRoom.memory.remoteRooms || [];
+        const assignments = homeRoom.memory.claimerAssignments || {};
+        
+        // Find unclaimed room
+        for (const roomName of remoteRooms) {
+            if (!assignments[roomName]) {
+                creep.memory.targetRoom = roomName;
+                assignments[roomName] = creep.name;
+                homeRoom.memory.claimerAssignments = assignments;
+                
+                // Update status
+                if (!homeRoom.memory.remoteAssignments) {
+                    homeRoom.memory.remoteAssignments = {};
+                }
+                if (!homeRoom.memory.remoteAssignments[roomName]) {
+                    homeRoom.memory.remoteAssignments[roomName] = {};
+                }
+                homeRoom.memory.remoteAssignments[roomName].claimer = creep.name;
+                return;
+            }
+        }
+        
+        // Check if existing claimer needs replacement
+        for (const roomName in assignments) {
+            const claimerName = assignments[roomName];
+            const claimer = Game.creeps[claimerName];
+            if (!claimer || claimer.ticksToLive < 100) {
+                // Replace this claimer
+                creep.memory.targetRoom = roomName;
+                assignments[roomName] = creep.name;
+                homeRoom.memory.claimerAssignments = assignments;
+                
+                if (homeRoom.memory.remoteAssignments[roomName]) {
+                    homeRoom.memory.remoteAssignments[roomName].claimer = creep.name;
+                }
+                return;
+            }
+        }
+        
+        creep.say('❌ no assign');
+    }
+    
+    travelToRoom(creep, roomName) {
+        const route = Game.map.findRoute(creep.room.name, roomName);
+        
+        if (route === ERR_NO_PATH) {
+            creep.say('❌ no path');
+            return;
+        }
+        
+        if (route.length > 0) {
+            const exit = creep.pos.findClosestByPath(route[0].exit);
+            if (exit) {
+                creep.moveTo(exit, {
+                    visualizePathStyle: { stroke: '#ff00ff' }
+                });
+            }
+        }
+    }
+    
+    travelHome(creep) {
+        if (creep.room.name === creep.memory.homeRoom) {
+            // Suicide to recycle
+            const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
+            if (spawn) {
+                if (spawn.recycleCreep(creep) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(spawn);
+                }
+            }
+            return;
+        }
+        
+        this.travelToRoom(creep, creep.memory.homeRoom);
+        creep.say('🏠 home');
+    }
+}
+
 // --- SourceManager.js ---
 /**
  * SourceManager - Manages stationary harvesting
@@ -2084,6 +2653,7 @@ class SpawnManager {
 
         const energyAvailable = room.energyAvailable;
         const energyCapacity = room.energyCapacityAvailable;
+        const energyFull = energyAvailable >= energyCapacity;
 
         // Count existing creeps
         const creeps = room.find(FIND_MY_CREEPS);
@@ -2103,6 +2673,9 @@ class SpawnManager {
         // Update spawn priority info in room memory for heartbeat display
         const nextSpawns = this.getNextSpawnPriority(room);
         room.memory.spawnPriority = nextSpawns;
+        
+        // Store energy status for other logic
+        room.memory.energyFull = energyFull;
         
         // EMERGENCY MODE: Less than 2 harvesters
         // This is critical - we need energy production immediately
@@ -2129,8 +2702,17 @@ class SpawnManager {
             return;
         }
 
+        // Check if we should wait for full energy to maximize body parts
+        // Only skip if we're not at full energy and have enough creeps to sustain
+        if (!energyFull && harvesters.length >= 2 && room.controller.level >= 2) {
+            // Wait for full energy unless it's early game
+            console.log('⏳ Waiting for full energy: ' + energyAvailable + '/' + energyCapacity);
+            return;
+        }
+
         // PHASE 1: Initial startup - exactly 2 harvesters, then 1 upgrader
         if (harvesters.length === 2 && upgraders.length < 1) {
+            // For early game, don't wait for full energy
             if (energyAvailable >= 200) {
                 this.spawnUpgrader(spawn, energyCapacity);
             }
@@ -2224,6 +2806,36 @@ class SpawnManager {
                 if (energyAvailable >= bodyCost) {
                     this.spawnRepairer(spawn, energyCapacity);
                 }
+            }
+        }
+        
+        // PHASE 5: Remote Workers (Multi-Room Harvesting)
+        // Spawn remote harvesters for adjacent rooms
+        const neededRemoteHarvesters = room.memory.neededRemoteHarvesters || 0;
+        const neededHaulers = room.memory.neededHaulers || 0;
+        const neededClaimers = room.memory.neededClaimers || 0;
+        
+        if (neededRemoteHarvesters > 0) {
+            const bodyCost = this.getRemoteHarvesterCost(energyCapacity);
+            if (energyAvailable >= bodyCost) {
+                this.spawnRemoteHarvester(spawn, energyCapacity, room.name);
+                return;
+            }
+        }
+        
+        if (neededHaulers > 0) {
+            const bodyCost = this.getHaulerCost(energyCapacity);
+            if (energyAvailable >= bodyCost) {
+                this.spawnHauler(spawn, energyCapacity, room.name);
+                return;
+            }
+        }
+        
+        if (neededClaimers > 0) {
+            const bodyCost = this.getClaimerCost(energyCapacity);
+            if (energyAvailable >= bodyCost) {
+                this.spawnClaimer(spawn, room.name);
+                return;
             }
         }
     }
@@ -2618,6 +3230,41 @@ class SpawnManager {
             }
         }
         
+        // PHASE 5: Remote Workers
+        const neededRemoteHarvesters = room.memory.neededRemoteHarvesters || 0;
+        const neededHaulers = room.memory.neededHaulers || 0;
+        const neededClaimers = room.memory.neededClaimers || 0;
+        
+        if (neededRemoteHarvesters > 0) {
+            priorities.push({
+                role: 'remoteharvester',
+                emoji: '🌍',
+                reason: neededRemoteHarvesters + ' remote harvesters needed',
+                priority: 1
+            });
+            if (priorities.length >= 2) return priorities;
+        }
+        
+        if (neededHaulers > 0) {
+            priorities.push({
+                role: 'hauler',
+                emoji: '🚚',
+                reason: neededHaulers + ' haulers needed',
+                priority: priorities.length === 0 ? 1 : 2
+            });
+            if (priorities.length >= 2) return priorities;
+        }
+        
+        if (neededClaimers > 0) {
+            priorities.push({
+                role: 'claimer',
+                emoji: '🏳️',
+                reason: neededClaimers + ' claimers needed',
+                priority: priorities.length === 0 ? 1 : 2
+            });
+            if (priorities.length >= 2) return priorities;
+        }
+        
         // If no specific needs, show what's at capacity
         if (priorities.length === 0) {
             if (room.memory.stationaryMode) {
@@ -2638,6 +3285,112 @@ class SpawnManager {
         }
 
         return priorities;
+    }
+    
+    // Remote worker body and spawn methods
+    getRemoteHarvesterCost(energyCapacity) {
+        // Remote harvester: WORK, WORK, CARRY, MOVE
+        // Needs to build container and harvest
+        const maxSets = Math.min(Math.floor(energyCapacity / 350), 5);
+        return maxSets > 0 ? maxSets * 350 : 350;
+    }
+    
+    getRemoteHarvesterBody(energyCapacity) {
+        const body = [];
+        // Maximize work parts for remote harvesting
+        let remaining = energyCapacity;
+        
+        while (remaining >= 350 && body.length < 50 - 4) {
+            body.push(WORK);
+            body.push(WORK);
+            body.push(CARRY);
+            body.push(MOVE);
+            remaining -= 350;
+        }
+        
+        return body.length > 0 ? body : [WORK, WORK, CARRY, MOVE];
+    }
+    
+    getHaulerCost(energyCapacity) {
+        // Hauler: CARRY, CARRY, MOVE - efficient transport
+        const maxSets = Math.min(Math.floor(energyCapacity / 150), 16);
+        return maxSets > 0 ? maxSets * 150 : 150;
+    }
+    
+    getHaulerBody(energyCapacity) {
+        const body = [];
+        // Maximize carry capacity
+        let remaining = energyCapacity;
+        
+        while (remaining >= 100 && body.length < 50 - 2) {
+            body.push(CARRY);
+            body.push(CARRY);
+            body.push(MOVE);
+            remaining -= 150;
+        }
+        
+        return body.length > 0 ? body : [CARRY, CARRY, MOVE];
+    }
+    
+    getClaimerCost(energyCapacity) {
+        // Claimer needs CLAIM part
+        return 650; // CLAIM + MOVE
+    }
+    
+    getClaimerBody(energyCapacity) {
+        return [CLAIM, MOVE];
+    }
+    
+    spawnRemoteHarvester(spawn, energyCapacity, homeRoomName) {
+        const body = this.getRemoteHarvesterBody(energyCapacity);
+        if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
+        
+        const name = 'RemoteHarvester' + Game.time;
+        const result = spawn.spawnCreep(body, name, {
+            memory: {
+                role: 'remoteharvester',
+                homeRoom: homeRoomName
+            }
+        });
+        
+        if (result === OK) {
+            console.log('🌍 Spawning remote harvester: ' + name);
+        }
+        return result;
+    }
+    
+    spawnHauler(spawn, energyCapacity, homeRoomName) {
+        const body = this.getHaulerBody(energyCapacity);
+        if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
+        
+        const name = 'Hauler' + Game.time;
+        const result = spawn.spawnCreep(body, name, {
+            memory: {
+                role: 'hauler',
+                homeRoom: homeRoomName
+            }
+        });
+        
+        if (result === OK) {
+            console.log('🚚 Spawning hauler: ' + name);
+        }
+        return result;
+    }
+    
+    spawnClaimer(spawn, homeRoomName) {
+        const body = [CLAIM, MOVE];
+        const name = 'Claimer' + Game.time;
+        const result = spawn.spawnCreep(body, name, {
+            memory: {
+                role: 'claimer',
+                homeRoom: homeRoomName
+            }
+        });
+        
+        if (result === OK) {
+            console.log('🏳️ Spawning claimer: ' + name);
+        }
+        return result;
     }
 }
 
@@ -2668,14 +3421,198 @@ class RoomManager {
             };
         }
         
+        // Initialize remote room tracking
+        if (!room.memory.remoteRooms) {
+            room.memory.remoteRooms = [];
+        }
+        if (!room.memory.remoteAssignments) {
+            room.memory.remoteAssignments = {};
+        }
+        
         // Run spawn logic - spawn creeps for GCL and base building
         this.spawnManager.run(room);
         
         // Manage construction - build base structures
         this.constructionManager.run(room);
         
+        // Manage remote rooms - scout and assign workers
+        this.manageRemoteRooms(room);
+        
         // Update room level tracking
         Memory.mokito.rooms[room.name].level = room.controller.level;
+    }
+    
+    manageRemoteRooms(room) {
+        // Only manage remote rooms if we have enough local workers
+        const creeps = room.find(FIND_MY_CREEPS);
+        const harvesters = creeps.filter(c => c.memory.role === 'harvester').length;
+        const upgraders = creeps.filter(c => c.memory.role === 'upgrader').length;
+        const runners = creeps.filter(c => c.memory.role === 'runner').length;
+        
+        // Need at least basic infrastructure before expanding
+        if (harvesters < 2 || upgraders < 1 || runners < 1) {
+            return;
+        }
+        
+        // Scout for new rooms
+        if (Game.time % 100 === 0) {
+            this.scoutRemoteRooms(room);
+        }
+        
+        // Update assignments for existing remote rooms
+        this.updateRemoteAssignments(room);
+        
+        // Spawn remote workers if needed
+        this.spawnRemoteWorkers(room);
+    }
+    
+    scoutRemoteRooms(room) {
+        // Find adjacent rooms
+        const exits = Game.map.describeExits(room.name);
+        
+        for (const direction in exits) {
+            const roomName = exits[direction];
+            
+            // Check if room is already known
+            if (room.memory.remoteRooms.includes(roomName)) {
+                continue;
+            }
+            
+            // Check room status
+            const roomStatus = Game.map.getRoomStatus(roomName);
+            if (roomStatus.status !== 'normal') {
+                continue;
+            }
+            
+            // Check if room has sources
+            // We'll need to scout it first
+            if (!room.memory.remoteAssignments[roomName]) {
+                room.memory.remoteRooms.push(roomName);
+                room.memory.remoteAssignments[roomName] = {
+                    scouting: true,
+                    sources: {}
+                };
+            }
+        }
+    }
+    
+    updateRemoteAssignments(room) {
+        for (const roomName of room.memory.remoteRooms) {
+            const assignment = room.memory.remoteAssignments[roomName];
+            if (!assignment) continue;
+            
+            // Check if we have visibility into the room
+            const remoteRoom = Game.rooms[roomName];
+            if (!remoteRoom) {
+                continue;
+            }
+            
+            // Scout the room if needed
+            if (assignment.scouting) {
+                this.scoutRoom(room, roomName, assignment);
+            }
+            
+            // Update source assignments
+            for (const sourceId in assignment.sources) {
+                const sourceAssignment = assignment.sources[sourceId];
+                
+                // Check if harvester is alive
+                if (sourceAssignment.harvester) {
+                    const harvester = Game.creeps[sourceAssignment.harvester];
+                    if (!harvester) {
+                        sourceAssignment.harvester = null;
+                    }
+                }
+                
+                // Check if hauler is alive
+                if (sourceAssignment.hauler) {
+                    const hauler = Game.creeps[sourceAssignment.hauler];
+                    if (!hauler) {
+                        sourceAssignment.hauler = null;
+                    }
+                }
+            }
+            
+            // Update claimer assignment
+            if (assignment.claimer) {
+                const claimer = Game.creeps[assignment.claimer];
+                if (!claimer) {
+                    assignment.claimer = null;
+                }
+            }
+        }
+    }
+    
+    scoutRoom(homeRoom, roomName, assignment) {
+        const remoteRoom = Game.rooms[roomName];
+        if (!remoteRoom) return;
+        
+        // Find sources
+        const sources = remoteRoom.find(FIND_SOURCES);
+        
+        // Create assignments for each source
+        for (const source of sources) {
+            if (!assignment.sources[source.id]) {
+                assignment.sources[source.id] = {
+                    harvester: null,
+                    hauler: null,
+                    containerBuilt: false,
+                    containerId: null,
+                    pos: {
+                        x: source.pos.x,
+                        y: source.pos.y
+                    }
+                };
+            }
+        }
+        
+        assignment.scouting = false;
+        console.log('🔍 Scouted ' + roomName + ': Found ' + sources.length + ' sources');
+    }
+    
+    spawnRemoteWorkers(room) {
+        // Count remote workers
+        const creeps = room.find(FIND_MY_CREEPS);
+        const remoteHarvesters = creeps.filter(c => c.memory.role === 'remoteharvester').length;
+        const haulers = creeps.filter(c => c.memory.role === 'hauler').length;
+        const claimers = creeps.filter(c => c.memory.role === 'claimer').length;
+        
+        // Calculate needed remote workers
+        let neededRemoteHarvesters = 0;
+        let neededHaulers = 0;
+        let neededClaimers = 0;
+        
+        for (const roomName of room.memory.remoteRooms) {
+            const assignment = room.memory.remoteAssignments[roomName];
+            if (!assignment || assignment.scouting) continue;
+            
+            for (const sourceId in assignment.sources) {
+                const sourceAssignment = assignment.sources[sourceId];
+                
+                if (!sourceAssignment.harvester) {
+                    neededRemoteHarvesters++;
+                }
+                if (!sourceAssignment.hauler && sourceAssignment.harvester) {
+                    neededHaulers++;
+                }
+            }
+            
+            // Check if we need a claimer
+            const remoteRoom = Game.rooms[roomName];
+            if (remoteRoom && remoteRoom.controller) {
+                const reservation = remoteRoom.controller.reservation;
+                if (!reservation || reservation.ticksToEnd < 1000) {
+                    if (!assignment.claimer) {
+                        neededClaimers++;
+                    }
+                }
+            }
+        }
+        
+        // Store needed counts in memory for SpawnManager to use
+        room.memory.neededRemoteHarvesters = neededRemoteHarvesters;
+        room.memory.neededHaulers = neededHaulers;
+        room.memory.neededClaimers = neededClaimers;
     }
 }
 
@@ -2687,7 +3624,10 @@ class CreepManager {
             upgrader: new Upgrader(),
             builder: new Builder(),
             repairer: new Repairer(),
-            runner: new Runner()
+            runner: new Runner(),
+            remoteharvester: new RemoteHarvester(),
+            hauler: new Hauler(),
+            claimer: new Claimer()
         };
     }
     

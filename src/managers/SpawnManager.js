@@ -28,6 +28,7 @@ class SpawnManager {
 
         const energyAvailable = room.energyAvailable;
         const energyCapacity = room.energyCapacityAvailable;
+        const energyFull = energyAvailable >= energyCapacity;
 
         // Count existing creeps
         const creeps = room.find(FIND_MY_CREEPS);
@@ -47,6 +48,9 @@ class SpawnManager {
         // Update spawn priority info in room memory for heartbeat display
         const nextSpawns = this.getNextSpawnPriority(room);
         room.memory.spawnPriority = nextSpawns;
+        
+        // Store energy status for other logic
+        room.memory.energyFull = energyFull;
         
         // EMERGENCY MODE: Less than 2 harvesters
         // This is critical - we need energy production immediately
@@ -73,8 +77,17 @@ class SpawnManager {
             return;
         }
 
+        // Check if we should wait for full energy to maximize body parts
+        // Only skip if we're not at full energy and have enough creeps to sustain
+        if (!energyFull && harvesters.length >= 2 && room.controller.level >= 2) {
+            // Wait for full energy unless it's early game
+            console.log('⏳ Waiting for full energy: ' + energyAvailable + '/' + energyCapacity);
+            return;
+        }
+
         // PHASE 1: Initial startup - exactly 2 harvesters, then 1 upgrader
         if (harvesters.length === 2 && upgraders.length < 1) {
+            // For early game, don't wait for full energy
             if (energyAvailable >= 200) {
                 this.spawnUpgrader(spawn, energyCapacity);
             }
@@ -168,6 +181,36 @@ class SpawnManager {
                 if (energyAvailable >= bodyCost) {
                     this.spawnRepairer(spawn, energyCapacity);
                 }
+            }
+        }
+        
+        // PHASE 5: Remote Workers (Multi-Room Harvesting)
+        // Spawn remote harvesters for adjacent rooms
+        const neededRemoteHarvesters = room.memory.neededRemoteHarvesters || 0;
+        const neededHaulers = room.memory.neededHaulers || 0;
+        const neededClaimers = room.memory.neededClaimers || 0;
+        
+        if (neededRemoteHarvesters > 0) {
+            const bodyCost = this.getRemoteHarvesterCost(energyCapacity);
+            if (energyAvailable >= bodyCost) {
+                this.spawnRemoteHarvester(spawn, energyCapacity, room.name);
+                return;
+            }
+        }
+        
+        if (neededHaulers > 0) {
+            const bodyCost = this.getHaulerCost(energyCapacity);
+            if (energyAvailable >= bodyCost) {
+                this.spawnHauler(spawn, energyCapacity, room.name);
+                return;
+            }
+        }
+        
+        if (neededClaimers > 0) {
+            const bodyCost = this.getClaimerCost(energyCapacity);
+            if (energyAvailable >= bodyCost) {
+                this.spawnClaimer(spawn, room.name);
+                return;
             }
         }
     }
@@ -562,6 +605,41 @@ class SpawnManager {
             }
         }
         
+        // PHASE 5: Remote Workers
+        const neededRemoteHarvesters = room.memory.neededRemoteHarvesters || 0;
+        const neededHaulers = room.memory.neededHaulers || 0;
+        const neededClaimers = room.memory.neededClaimers || 0;
+        
+        if (neededRemoteHarvesters > 0) {
+            priorities.push({
+                role: 'remoteharvester',
+                emoji: '🌍',
+                reason: neededRemoteHarvesters + ' remote harvesters needed',
+                priority: 1
+            });
+            if (priorities.length >= 2) return priorities;
+        }
+        
+        if (neededHaulers > 0) {
+            priorities.push({
+                role: 'hauler',
+                emoji: '🚚',
+                reason: neededHaulers + ' haulers needed',
+                priority: priorities.length === 0 ? 1 : 2
+            });
+            if (priorities.length >= 2) return priorities;
+        }
+        
+        if (neededClaimers > 0) {
+            priorities.push({
+                role: 'claimer',
+                emoji: '🏳️',
+                reason: neededClaimers + ' claimers needed',
+                priority: priorities.length === 0 ? 1 : 2
+            });
+            if (priorities.length >= 2) return priorities;
+        }
+        
         // If no specific needs, show what's at capacity
         if (priorities.length === 0) {
             if (room.memory.stationaryMode) {
@@ -582,6 +660,112 @@ class SpawnManager {
         }
 
         return priorities;
+    }
+    
+    // Remote worker body and spawn methods
+    getRemoteHarvesterCost(energyCapacity) {
+        // Remote harvester: WORK, WORK, CARRY, MOVE
+        // Needs to build container and harvest
+        const maxSets = Math.min(Math.floor(energyCapacity / 350), 5);
+        return maxSets > 0 ? maxSets * 350 : 350;
+    }
+    
+    getRemoteHarvesterBody(energyCapacity) {
+        const body = [];
+        // Maximize work parts for remote harvesting
+        let remaining = energyCapacity;
+        
+        while (remaining >= 350 && body.length < 50 - 4) {
+            body.push(WORK);
+            body.push(WORK);
+            body.push(CARRY);
+            body.push(MOVE);
+            remaining -= 350;
+        }
+        
+        return body.length > 0 ? body : [WORK, WORK, CARRY, MOVE];
+    }
+    
+    getHaulerCost(energyCapacity) {
+        // Hauler: CARRY, CARRY, MOVE - efficient transport
+        const maxSets = Math.min(Math.floor(energyCapacity / 150), 16);
+        return maxSets > 0 ? maxSets * 150 : 150;
+    }
+    
+    getHaulerBody(energyCapacity) {
+        const body = [];
+        // Maximize carry capacity
+        let remaining = energyCapacity;
+        
+        while (remaining >= 100 && body.length < 50 - 2) {
+            body.push(CARRY);
+            body.push(CARRY);
+            body.push(MOVE);
+            remaining -= 150;
+        }
+        
+        return body.length > 0 ? body : [CARRY, CARRY, MOVE];
+    }
+    
+    getClaimerCost(energyCapacity) {
+        // Claimer needs CLAIM part
+        return 650; // CLAIM + MOVE
+    }
+    
+    getClaimerBody(energyCapacity) {
+        return [CLAIM, MOVE];
+    }
+    
+    spawnRemoteHarvester(spawn, energyCapacity, homeRoomName) {
+        const body = this.getRemoteHarvesterBody(energyCapacity);
+        if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
+        
+        const name = 'RemoteHarvester' + Game.time;
+        const result = spawn.spawnCreep(body, name, {
+            memory: {
+                role: 'remoteharvester',
+                homeRoom: homeRoomName
+            }
+        });
+        
+        if (result === OK) {
+            console.log('🌍 Spawning remote harvester: ' + name);
+        }
+        return result;
+    }
+    
+    spawnHauler(spawn, energyCapacity, homeRoomName) {
+        const body = this.getHaulerBody(energyCapacity);
+        if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
+        
+        const name = 'Hauler' + Game.time;
+        const result = spawn.spawnCreep(body, name, {
+            memory: {
+                role: 'hauler',
+                homeRoom: homeRoomName
+            }
+        });
+        
+        if (result === OK) {
+            console.log('🚚 Spawning hauler: ' + name);
+        }
+        return result;
+    }
+    
+    spawnClaimer(spawn, homeRoomName) {
+        const body = [CLAIM, MOVE];
+        const name = 'Claimer' + Game.time;
+        const result = spawn.spawnCreep(body, name, {
+            memory: {
+                role: 'claimer',
+                homeRoom: homeRoomName
+            }
+        });
+        
+        if (result === OK) {
+            console.log('🏳️ Spawning claimer: ' + name);
+        }
+        return result;
     }
 }
 

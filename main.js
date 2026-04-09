@@ -1,12 +1,6 @@
 'use strict';
 
-// ============================================
-// Mokito Bot - Full Readable Build
-// Built: 2026-04-09T07:22:30.710Z
-// ============================================
 
-
-// --- Harvester.js ---
 /**
  * Harvester - Two-phase strategy with global room mode tracking
  * Phase 1: Traditional - Deliver energy to spawn (until all source positions filled)
@@ -461,7 +455,6 @@ class Harvester {
     }
 }
 
-// --- Runner.js ---
 /**
  * Runner - Transports energy from dropped locations to spawn/extensions
  * Used in stationary harvesting mode to move energy from harvester drops to storage
@@ -754,7 +747,6 @@ class Runner {
     }
 }
 
-// --- Upgrader.js ---
 /**
  * Upgrader - Mines energy and upgrades controller
  * Priority: Self-mining (always) > Dropped energy (if available) > Containers/Storage
@@ -919,7 +911,6 @@ class Upgrader {
     }
 }
 
-// --- Builder.js ---
 /**
  * Builder - Builds construction sites
  * Priority: Dropped energy > Containers/Storage > Self-mining
@@ -1203,7 +1194,6 @@ class Builder {
     }
 }
 
-// --- Repairer.js ---
 /**
  * Repairer - Repairs structures (roads, containers, ramparts, walls)
  * Priority: Dropped energy > Containers/Storage > Self-mining
@@ -1427,7 +1417,6 @@ class Repairer {
     }
 }
 
-// --- RemoteHarvester.js ---
 /**
  * RemoteHarvester - Mines energy from sources in remote rooms
  * Travels to target room, builds a container near source, and mines
@@ -1650,7 +1639,6 @@ class RemoteHarvester {
     }
 }
 
-// --- Hauler.js ---
 /**
  * Hauler - Transports energy from remote rooms to home room
  * Collects from containers built by RemoteHarvesters
@@ -1864,7 +1852,6 @@ class Hauler {
     }
 }
 
-// --- Claimer.js ---
 /**
  * Claimer - Reserves controller in remote rooms to prevent decay
  * Travels to target room and reserves controller
@@ -1996,7 +1983,6 @@ class Claimer {
     }
 }
 
-// --- Defender.js ---
 /**
  * Defender - Protects room from hostile creeps
  * Automatically spawned when enemies are detected in the room
@@ -2198,7 +2184,6 @@ class Defender {
     }
 }
 
-// --- Attacker.js ---
 /**
  * Attacker - Part of attack squads (3 attackers + 1 healer)
  * Travels to enemy rooms and destroys structures/spawn
@@ -2531,7 +2516,6 @@ class Attacker {
     }
 }
 
-// --- Healer.js ---
 /**
  * Healer - Part of attack squads (1 healer per squad of 4)
  * Heals attackers and keeps the squad alive
@@ -2826,7 +2810,6 @@ class Healer {
     }
 }
 
-// --- Scout.js ---
 /**
  * Scout - Reconnaissance creep that explores rooms
  * Moves room to room, gathering intelligence
@@ -3139,7 +3122,6 @@ class Scout {
     }
 }
 
-// --- SourceManager.js ---
 /**
  * SourceManager - Manages stationary harvesting
  * Each source gets dedicated harvesters for each open position around it
@@ -3306,7 +3288,6 @@ class SourceManager {
     }
 }
 
-// --- MemoryManager.js ---
 class MemoryManager {
     cleanup() {
         // Clean up dead creeps from memory
@@ -3329,6 +3310,11 @@ class MemoryManager {
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];
             if (room.controller && room.controller.my) {
+                // Initialize room memory if not exists
+                if (!Memory.rooms[roomName]) {
+                    Memory.rooms[roomName] = {};
+                }
+                
                 if (!room.memory.spawnPriority) {
                     room.memory.spawnPriority = [];
                 }
@@ -3345,7 +3331,6 @@ class MemoryManager {
     }
 }
 
-// --- ConstructionManager.js ---
 /**
  * ConstructionManager - Plans and initiates construction of room structures
  * Priorities:
@@ -3767,7 +3752,6 @@ class ConstructionManager {
     }
 }
 
-// --- SpawnManager.js ---
 /**
  * SpawnManager - Manages creep spawning with priority system
  * 
@@ -4540,7 +4524,6 @@ class SpawnManager {
     }
 }
 
-// --- RoomManager.js ---
 /**
  * RoomManager - Manages owned rooms including defense, offense, and economy
  * Handles military operations, room threats, and attack coordination
@@ -5095,7 +5078,6 @@ class RoomManager {
     }
 }
 
-// --- CreepManager.js ---
 class CreepManager {
     constructor() {
         this.roles = {
@@ -5128,7 +5110,6 @@ class CreepManager {
     }
 }
 
-// --- Mokito.js ---
 class Mokito {
     constructor() {
         this.creepManager = new CreepManager();
@@ -5201,7 +5182,6 @@ class Mokito {
     }
 }
 
-// --- Bootstrap ---
 module.exports.loop = function() {
     if (!global.MokitoInstance) {
         global.MokitoInstance = new Mokito();

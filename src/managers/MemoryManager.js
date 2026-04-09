@@ -22,6 +22,11 @@ class MemoryManager {
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];
             if (room.controller && room.controller.my) {
+                // Initialize room memory if not exists
+                if (!Memory.rooms[roomName]) {
+                    Memory.rooms[roomName] = {};
+                }
+                
                 if (!room.memory.spawnPriority) {
                     room.memory.spawnPriority = [];
                 }

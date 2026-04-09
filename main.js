@@ -2,7 +2,7 @@
 
 // ============================================
 // Mokito Bot - Combined Build
-// Built: 2026-04-08T11:53:55.447Z
+// Built: 2026-04-09T05:49:00.207Z
 // ============================================
 
 
@@ -41,7 +41,7 @@ class Harvester {
         // Emergency: If less than 2 harvesters, force traditional mode
         if (harvesters.length < 2) {
             if (Memory.rooms[room.name].harvesterMode === 'stationary') {
-                console.log('EMERGENCY: Harvester count dropped below 2, switching to traditional mode');
+                // Silently switch back to traditional mode
                 Memory.rooms[room.name].harvesterMode = 'traditional';
             }
             return 'traditional';
@@ -57,7 +57,7 @@ class Harvester {
         // Switch to stationary when we have harvesters >= positions
         if (harvesters.length >= totalPositions) {
             if (Memory.rooms[room.name].harvesterMode !== 'stationary') {
-                console.log('Switching to stationary harvesting mode');
+                // Silently switch to stationary mode
                 Memory.rooms[room.name].harvesterMode = 'stationary';
             }
             return 'stationary';
@@ -65,7 +65,7 @@ class Harvester {
         
         // Otherwise stay in/return to traditional mode
         if (Memory.rooms[room.name].harvesterMode === 'stationary') {
-            console.log('Harvester count dropped, reverting to traditional mode');
+            // Silently revert to traditional mode
             Memory.rooms[room.name].harvesterMode = 'traditional';
         }
         return 'traditional';
@@ -3839,7 +3839,7 @@ class SpawnManager {
                             delivering: false
                         }
                     });
-                    console.log('🚨 EMERGENCY: Spawning harvester ' + name);
+                    // Emergency harvester spawned silently
                 }
             }
             return;
@@ -3890,7 +3890,7 @@ class SpawnManager {
         // This happens when we have enough harvesters to cover all source positions
         if (harvesters.length >= totalSourcePositions) {
             if (!room.memory.stationaryMode) {
-                console.log('🔄 Switching to stationary harvesting mode');
+                // Room switching to stationary mode (logged in heartbeat)
                 room.memory.stationaryMode = true;
             }
         }

@@ -71,7 +71,7 @@ class SpawnManager {
                             delivering: false
                         }
                     });
-                    console.log('🚨 EMERGENCY: Spawning harvester ' + name);
+                    // Emergency harvester spawned silently
                 }
             }
             return;
@@ -122,7 +122,7 @@ class SpawnManager {
         // This happens when we have enough harvesters to cover all source positions
         if (harvesters.length >= totalSourcePositions) {
             if (!room.memory.stationaryMode) {
-                console.log('🔄 Switching to stationary harvesting mode');
+                // Room switching to stationary mode (logged in heartbeat)
                 room.memory.stationaryMode = true;
             }
         }

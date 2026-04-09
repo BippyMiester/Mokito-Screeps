@@ -5337,7 +5337,8 @@ class Mokito {
         }
         
         // Phase 4: Efficiency (stationary harvesting, containers)
-        if (!room.memory.stationaryMode) {
+        const roomMem = Memory.rooms[room.name] || {};
+        if (roomMem.harvesterMode !== 'stationary') {
             return { current: 4, name: 'Efficiency - Stationary Harvest', next: 5 };
         }
         const containers = room.find(FIND_STRUCTURES, {

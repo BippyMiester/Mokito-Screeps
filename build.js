@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Build script for Mokito bot - Creates readable and minimized versions
- * Safe minification that preserves critical method names
+ * Build script for Mokito bot - Safe minimization
+ * ONLY removes comments and extra whitespace, preserves ALL code
  */
 
 const fs = require('fs');
@@ -34,7 +34,6 @@ const buildOrder = [
     'src/managers/RoomManager.js',
     'src/managers/CreepManager.js',
     'src/core/Mokito.js'
-    // Note: src/main.js is handled separately
 ];
 
 let fullOutput = "'use strict';\n\n";
@@ -77,99 +76,58 @@ fs.writeFileSync(FULL_OUTPUT, fullOutput);
 console.log('');
 console.log('✓ main-full.js created');
 
-// Create minimized version
+// Create minimized version - simplest possible approach
 console.log('');
 console.log('Minimizing...');
 
 let minCode = fullOutput;
 
-// Remove comments
+// Simple minification: remove comments and extra whitespace
+// Keep all other code exactly as-is
+
+// First, protect strings
+const strings = [];
+let strIdx = 0;
+
+function protectStrings(code) {
+    // Match single quotes, double quotes, and template literals
+    const regex = /(['"`])((?:\1|[^\1\\]|\\.)*?)\1/g;
+    return code.replace(regex, (match) => {
+        const placeholder = `__STR_${strIdx}_`;
+        strings[strIdx] = match;
+        strIdx++;
+        return placeholder;
+    });
+}
+
+function restoreStrings(code) {
+    return code.replace(/__STR_(\d+)_/g, (match, idx) => {
+        return strings[parseInt(idx)];
+    });
+}
+
+// Protect strings
+minCode = protectStrings(minCode);
+
+// Remove // comments
 minCode = minCode.replace(/\/\/.*$/gm, '');
+// Remove /* */ comments
 minCode = minCode.replace(/\/\*[\s\S]*?\*\//g, '');
 
-// Class name mapping
-const classMap = {
-    'Harvester': 'H',
-    'Runner': 'R',
-    'Upgrader': 'U',
-    'Builder': 'B',
-    'Repairer': 'Rp',
-    'RemoteHarvester': 'RH',
-    'Hauler': 'Ha',
-    'Claimer': 'C',
-    'Defender': 'D',
-    'Attacker': 'A',
-    'Healer': 'He',
-    'Scout': 'S',
-    'SpawnManager': 'SM',
-    'CreepManager': 'CM',
-    'RoomManager': 'RM',
-    'ConstructionManager': 'CoM',
-    'MemoryManager': 'MeM',
-    'SourceManager': 'SoM',
-    'Mokito': 'M'
-};
+// Collapse multiple whitespace to single space (but preserve structure)
+minCode = minCode.replace(/[ \t]+/g, ' ');
+// Remove whitespace at line starts
+minCode = minCode.replace(/^[ \t]+/gm, '');
+// Remove empty lines
+minCode = minCode.replace(/\n+/g, '\n');
 
-// Replace class names
-for (const [oldName, newName] of Object.entries(classMap)) {
-    const classDeclRegex = new RegExp('class\\s+' + oldName + '\\s*\\{', 'g');
-    minCode = minCode.replace(classDeclRegex, 'class ' + newName + ' {');
-    
-    const newInstanceRegex = new RegExp('new\\s+' + oldName + '\\s*\\(', 'g');
-    minCode = minCode.replace(newInstanceRegex, 'new ' + newName + '(');
-}
+// Restore strings
+minCode = restoreStrings(minCode);
 
-// Property shortening
-const propMap = {
-    'memory': 'mem',
-    'room': 'rm',
-    'pos': 'p',
-    'controller': 'ctrl',
-    'spawn': 'sp',
-    'spawning': 'spg',
-    'energyAvailable': 'ea',
-    'energyCapacityAvailable': 'eca',
-    'store': 'st',
-    'hits': 'h',
-    'hitsMax': 'hm',
-    'sourceId': 'sid',
-    'targetRoom': 'tr',
-    'homeRoom': 'hr',
-    'squadId': 'sqid',
-    'containerId': 'cid'
-};
-
-for (const [oldName, newName] of Object.entries(propMap)) {
-    minCode = minCode.replace(new RegExp('\\.' + oldName + '\\b', 'g'), '.' + newName);
-}
-
-// Remove whitespace
-minCode = minCode.replace(/\n\s*/g, '\n');
-minCode = minCode.replace(/\s+/g, ' ');
-minCode = minCode.replace(/;\s*}/g, ';}');
-minCode = minCode.replace(/{\s*/g, '{');
-minCode = minCode.replace(/}\s*/g, '}');
-minCode = minCode.replace(/,\s*/g, ',');
-minCode = minCode.replace(/;\s*/g, ';');
-
-// Remove spaces around operators
-minCode = minCode.replace(/\s*=\s*/g, '=');
-minCode = minCode.replace(/\s*===\s*/g, '===');
-minCode = minCode.replace(/\s*!==\s*/g, '!==');
-minCode = minCode.replace(/\s*\|\|\s*/g, '||');
-minCode = minCode.replace(/\s*\u0026\u0026\s*/g, '&&');
-
-// Keep console logs for debugging visibility
-// minCode = minCode.replace(/console\.log\([^)]*\);/g, '');
-
-// Clean up
-minCode = minCode.replace(/;+/g, ';');
-minCode = minCode.replace(/'use strict';'use strict';/g, "'use strict';");
-minCode = minCode.replace(/;\s*$/g, '');
-
-// Ensure bootstrap is correct
-if (!minCode.includes('global.MokitoInstance.run()')) {
-    minCode = minCode.replace(/global\.M\.run\(\)/g, 'global.MokitoInstance.run()');
+// Final cleanup
+minCode = minCode.trim();
+if (!minCode.endsWith('\n')) {
+    minCode += '\n';
 }
 
 fs.writeFileSync(MIN_OUTPUT, minCode);
@@ -181,3 +139,5 @@ console.log('');
 console.log('   main-full.js: ' + (fs.statSync(FULL_OUTPUT).size / 1024).toFixed(2) + ' KB');
 console.log('   main.js:      ' + (fs.statSync(MIN_OUTPUT).size / 1024).toFixed(2) + ' KB');
 console.log('   Compression:  ' + ((1 - fs.statSync(MIN_OUTPUT).size / fs.statSync(FULL_OUTPUT).size) * 100).toFixed(1) + '%');
+console.log('');
+console.log('Note: Screeps API names are preserved');

@@ -1,30 +1,33 @@
 # Session State
 
+## Critical User Instructions
+
+### Always Push to GitHub
+**Rule:** Anytime anything is updated in the repository, it must be pushed to GitHub immediately.
+
+**Trigger:** File modifications, edits, new files, deletions
+**Action:** 
+1. Stage changes (`git add -A`)
+2. Commit with descriptive message
+3. Push to GitHub (`git push`)
+
+**Never leave uncommitted/unpushed changes in the working directory.**
+
+---
+
 ## Current Session
-- **Date**: 2026-04-08
+- **Date**: 2026-04-09
 - **Project**: Mokito Screeps Bot
-- **Status**: Active development complete
+- **Status**: Phases 0-3 Complete
 
 ## Recent Work
-- Multi-room harvesting implementation
-- Defense structures (towers, ramparts, walls)
-- Creep ratio updates (1:1 builders:upgraders)
-- Screeps server fixes and systemd configuration
-- Created push-to-github.sh script for memory syncing
+- Fixed build script to create proper minimized version
+- main.js now correctly calls global.MokitoInstance.run()
+- Build produces both main-full.js (readable) and main.js (minimized)
 
-## Server Status
-- Screeps server running via systemd
-- Tick rate: 250ms
-- Ports: 21025 (game), 21026 (CLI) active
-- Database: Fresh from re-initialization
+## Next Steps
+- Phase 4 implementation: Stationary harvesting
 
-## Next Tasks
-- Test bot in-game
-- Verify multi-room harvesting
-- Monitor defense construction
-- Check remote worker functionality
+---
 
-## Notes
-- All memory files now synced to repo via push script
-- Steam API key stored in .env file
-- Server management via systemctl commands
+*This file is automatically updated*

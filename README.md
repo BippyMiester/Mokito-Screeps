@@ -6,15 +6,49 @@
 
 An advanced AI bot for [Screeps](https://screeps.com/), the world's first persistent MMO strategy game where you control units through writing JavaScript code. Mokito features an efficient multi-phase economy system with stationary harvesting, automatic creep spawning priorities, and intelligent energy distribution.
 
+## 📊 Implementation Status
+
+| Phase | Status | Description | Completion |
+|-------|--------|-------------|------------|
+| 0 | ✅ **COMPLETE** | Emergency Mode - Basic survival with minimal creeps | 100% |
+| 1 | ✅ **COMPLETE** | Foundation - Harvester, Runner, basic spawning | 100% |
+| 2 | ✅ **COMPLETE** | Stabilization - Upgrader, Builder roles | 100% |
+| 3 | ✅ **COMPLETE** | Capacity - Extension construction | 100% |
+| 4 | ⏳ **NEXT** | Efficiency - Stationary harvesting, containers | 0% |
+| 5-8 | ⏳ PENDING | Infrastructure & Defense - Roads, ramparts, towers | 0% |
+| 9+ | ⏳ PENDING | Expansion, Military, Endgame | 0% |
+
+**Current Focus:** Phases 0-3 are **100% complete** and ready for deployment! 🎉
+
+**Bot Statistics:**
+- Size: 177.98 KB
+- 20 modules
+- 12 creep roles implemented
+- Last updated: 2026-04-09
+
+---
+
 ## 🎮 Features
 
-- **Multi-Phase Economy System**: Automatically adapts from early game to late game
-- **Stationary Harvesting**: Maximizes energy output with dedicated harvesters
-- **Smart Energy Distribution**: Runners transport energy from drops to spawn/extensions
-- **Automated Spawning**: Intelligent creep priority system based on room needs
-- **Construction Management**: Automatic road building, extension placement, and structure repair
-- **Role-Based Architecture**: Modular design with specialized creep roles
-- **Emergency Recovery**: Automatically recovers from disaster scenarios
+### Implemented (Phases 0-3) ✅
+- **Emergency Recovery**: Automatic spawning when harvesters < 2
+- **Phase-Based Spawning**: Priority system from early to late game
+- **Multi-Role Creeps**: Harvester, Runner, Upgrader, Builder, Repairer
+- **Smart Energy Distribution**: Automatic transport from drops to spawn
+- **Extension Construction**: Automated diamond-pattern placement
+- **Console Management**: Minimal spam, heartbeat every 60 ticks
+- **Memory Persistence**: Session history and development logs
+
+### Planned (Phases 4-20)
+- **Stationary Harvesting**: Container-based energy extraction
+- **Road Networks**: Automated path construction
+- **Defense System**: Ramparts, towers, defender creeps
+- **Military Operations**: Attack squads, healing coordination
+- **Scout Network**: Intelligence gathering
+- **Remote Mining**: Multi-room expansion
+- **Market Trading**: Resource arbitrage
+- **Power Processing**: NPC strongholds
+- **Nuclear Capabilities**: Endgame destruction
 
 ## 📋 Table of Contents
 
@@ -144,12 +178,33 @@ Mokito follows a strict spawning priority system:
 │   │   ├── MemoryManager.js   # Memory cleanup
 │   │   └── SourceManager.js   # Source management
 │   ├── roles/
-│   │   ├── Harvester.js     # Mining logic
-│   │   ├── Runner.js        # Energy transport
-│   │   ├── Upgrader.js      # Controller upgrading
-│   │   ├── Builder.js       # Construction
-│   │   └── Repairer.js      # Repair logic
+│   │   ├── Harvester.js     # Mining logic (Phase 1 ✅)
+│   │   ├── Runner.js        # Energy transport (Phase 1 ✅)
+│   │   ├── Upgrader.js      # Controller upgrading (Phase 2 ✅)
+│   │   ├── Builder.js       # Construction (Phase 2 ✅)
+│   │   ├── Repairer.js      # Repair logic (Phase 2 ✅)
+│   │   ├── RemoteHarvester.js  # Remote mining (Phase 6)
+│   │   ├── Hauler.js        # Long-distance transport (Phase 6)
+│   │   ├── Claimer.js       # Room reservation (Phase 9)
+│   │   ├── Defender.js      # Room defense (Phase 10)
+│   │   ├── Attacker.js      # Military attacks (Phase 12)
+│   │   ├── Healer.js        # Squad support (Phase 12)
+│   │   └── Scout.js         # Intelligence (Phase 11)
 │   └── utils/
+├── strategy/              # Strategy documentation
+│   ├── STRATEGY.md        # Complete 20-phase strategy
+│   ├── TASK_IMPLEMENTATION.md  # Detailed task list
+│   ├── BOT_COMPARISON.md  # Example bot analysis
+│   ├── MILITARY_ANALYSIS.md    # Military tactics
+│   └── README.md          # Strategy index
+├── cli/                   # CLI utilities
+│   ├── reset-server.js    # Server reset script
+│   └── set-tickrate.js    # Tick rate configuration
+├── memory/                # Session memories
+├── scripts/               # Helper scripts
+│   └── push-to-github.sh  # Automated push with memory sync
+├── AGENTS.md              # OpenCode agent configuration
+├── .env.example           # Environment template
 └── README.md              # This file
 ```
 

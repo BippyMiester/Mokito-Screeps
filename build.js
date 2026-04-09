@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
- * Build script for Mokito bot
- * Removes comments and excess whitespace while preserving code structure
+ * Build script for Mokito bot - Proper minification
  */
 
 const fs = require('fs');
@@ -68,68 +67,65 @@ fs.writeFileSync(FULL_OUTPUT, fullOutput);
 console.log('');
 console.log('✓ main-full.js created');
 
-// Safe minification - only remove comments and empty lines
+// Minification
 console.log('');
 console.log('Minimizing...');
 
-let minCode = fullOutput;
+let code = fullOutput;
 
-// Step 1: Protect strings by replacing with placeholders
+// Protect strings
 const strings = [];
-let strIdx = 0;
-const stringPlaceholder = () => `__STR${strIdx++}__`;
+let strCount = 0;
 
-// Protect single-quoted strings
-minCode = minCode.replace(/'[^'\\]*(?:\\.[^'\\]*)*'/g, (m) => {
-  strings.push(m);
-  return stringPlaceholder();
-});
+function saveString(str) {
+  const idx = strCount++;
+  strings[idx] = str;
+  return `__STR_${idx}__`;
+}
 
-// Protect double-quoted strings  
-minCode = minCode.replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, (m) => {
-  strings.push(m);
-  return stringPlaceholder();
-});
+// Protect strings (single, double, template)
+code = code.replace(/'[^'\\]*(?:\\.[^'\\]*)*'/g, saveString);
+code = code.replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, saveString);
+code = code.replace(/`[^`\\]*(?:\\.[^`\\]*)*`/g, saveString);
 
-// Protect template literals
-minCode = minCode.replace(/`[^`\\]*(?:\\.[^`\\]*)*`/g, (m) => {
-  strings.push(m);
-  return stringPlaceholder();
-});
+// Remove // comments
+code = code.replace(/\/\/.*$/gm, '');
 
-// Step 2: Remove single-line comments
-minCode = minCode.replace(/\/\/.*$/gm, '');
+// Remove /* */ comments  
+code = code.replace(/\/\*[\s\S]*?\*\//g, '');
 
-// Step 3: Remove multi-line comments
-minCode = minCode.replace(/\/\*[\s\S]*?\*\//g, '');
+// Split into lines and process
+let lines = code.split('\n');
+let result = [];
 
-// Step 4: Remove empty lines and trim whitespace
-const lines = minCode.split('\n');
-const processedLines = [];
-
-for (const line of lines) {
-  const trimmed = line.trim();
-  // Keep non-empty lines
-  if (trimmed) {
-    processedLines.push(trimmed);
+for (let line of lines) {
+  // Trim whitespace
+  line = line.trim();
+  // Skip empty lines
+  if (line) {
+    result.push(line);
   }
 }
 
-minCode = processedLines.join('\n');
+code = result.join('\n');
 
-// Step 5: Restore strings
-minCode = minCode.replace(/__STR(\d+)__/g, (match, idx) => {
+// Restore strings
+code = code.replace(/__STR_(\d+)__/g, (match, idx) => {
   return strings[parseInt(idx)];
 });
 
-// Ensure file ends with newline
-if (!minCode.endsWith('\n')) {
-  minCode += '\n';
+// Ensure newline at end
+if (!code.endsWith('\n')) {
+  code += '\n';
 }
 
-fs.writeFileSync(MIN_OUTPUT, minCode);
+fs.writeFileSync(MIN_OUTPUT, code);
+
 console.log('✓ main.js created (minified)');
 console.log('');
-console.log('   main-full.js: ' + (fs.statSync(FULL_OUTPUT).size / 1024).toFixed(2) + ' KB');
-console.log('   main.js:      ' + (fs.statSync(MIN_OUTPUT).size / 1024).toFixed(2) + ' KB');
-console.log('   Compression:  ' + ((1 - fs.statSync(MIN_OUTPUT).size / fs.statSync(FULL_OUTPUT).size) * 100).toFixed(1) + '%');
+
+// Verify with ls -la
+console.log('File sizes:');
+const { execSync } = require('child_process');
+const output = execSync('ls -la main*.js', { cwd: __dirname, encoding: 'utf8' });
+console.log(output);

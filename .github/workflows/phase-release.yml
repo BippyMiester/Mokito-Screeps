@@ -1,0 +1,55 @@
+name: Phase Release
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  create-phase-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Check for phase completion
+        id: check-phase
+        run: |
+          # Check commit message for phase completion pattern
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          echo "Commit message: $COMMIT_MSG"
+          
+          # Check if commit message indicates phase completion
+          if echo "$COMMIT_MSG" | grep -iE "(complete phase [0-9]+|phase [0-9]+ complete|finished phase [0-9]+|phase [0-9]+ finished)" > /dev/null; then
+            # Extract phase number
+            PHASE_NUM=$(echo "$COMMIT_MSG" | grep -oE "[0-9]+" | head -1)
+            echo "phase=$PHASE_NUM" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "Phase $PHASE_NUM completion detected"
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "No phase completion detected"
+          fi
+
+      - name: Create Phase Release
+        if: steps.check-phase.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: phase-${{ steps.check-phase.outputs.phase }}
+          name: Phase ${{ steps.check-phase.outputs.phase }}
+          body: |
+            ## Phase ${{ steps.check-phase.outputs.phase }} Release
+            
+            This release includes all functionality up to and including Phase ${{ steps.check-phase.outputs.phase }}.
+            
+            ### Files
+            - `main.js` - Minified production version
+            - `main-full.js` - Readable development version
+            
+            ### Deployment
+            Upload `main.js` to the Screeps IDE or use the Screeps API.
+          files: |
+            main.js
+            main-full.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

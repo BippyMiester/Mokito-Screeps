@@ -78,9 +78,12 @@ class SpawnManager {
         }
 
         // Check if we should wait for full energy to maximize body parts
-        // Only skip if we're not at full energy and have enough creeps to sustain
-        if (!energyFull && harvesters.length >= 2 && room.controller.level >= 2) {
-            // Wait for full energy unless it's early game
+        // BUT: Never wait if we have no runners in stationary mode - that's a deadlock
+        const inStationaryMode = room.memory.harvesterMode === 'stationary' || room.memory.stationaryMode;
+        const criticalNeedRunner = inStationaryMode && runners.length < 1 && harvesters.length >= 2;
+        
+        if (!energyFull && harvesters.length >= 2 && room.controller.level >= 2 && !criticalNeedRunner) {
+            // Wait for full energy unless it's early game or critical need
             // Status will be shown in heartbeat
             room.memory.waitingForEnergy = true;
             return;

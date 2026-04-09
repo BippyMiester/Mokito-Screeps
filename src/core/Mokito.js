@@ -100,7 +100,13 @@ class Mokito {
         // Once we've reached Phase 4+, we don't drop back to Phase 3 just because harvesters died
         const inStationaryMode = roomMem.harvesterMode === 'stationary';
         
-        // Phase 4+: If we're in stationary mode, continue with Phase 4+ logic
+        // CRITICAL: Even in stationary mode, if we have no runners, we must build them
+        // Otherwise harvesters drop energy at sources but spawn can't get it
+        if (inStationaryMode && runners < 1) {
+            return { current: 1, name: 'Foundation - EMERGENCY: Need Runners!', next: 2 };
+        }
+        
+        // Phase 4+: If we're in stationary mode with runners, continue with Phase 4+ logic
         if (inStationaryMode) {
             // Phase 4: Efficiency (stationary harvesting, containers)
             const containers = room.find(FIND_STRUCTURES, {

@@ -67,61 +67,60 @@ fs.writeFileSync(FULL_OUTPUT, fullOutput);
 console.log('');
 console.log('✓ main-full.js created');
 
-// Minification
+// Minification - collapse to single line
 console.log('');
 console.log('Minimizing...');
 
 let code = fullOutput;
 
-// Protect strings
+// Step 1: Protect all strings by replacing with placeholders
 const strings = [];
-let strCount = 0;
+let strIdx = 0;
+const placeholder = () => `__S${strIdx++}__`;
 
-function saveString(str) {
-  const idx = strCount++;
-  strings[idx] = str;
-  return `__STR_${idx}__`;
-}
-
-// Protect strings (single, double, template)
-code = code.replace(/'[^'\\]*(?:\\.[^'\\]*)*'/g, saveString);
-code = code.replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, saveString);
-code = code.replace(/`[^`\\]*(?:\\.[^`\\]*)*`/g, saveString);
-
-// Remove // comments
-code = code.replace(/\/\/.*$/gm, '');
-
-// Remove /* */ comments  
-code = code.replace(/\/\*[\s\S]*?\*\//g, '');
-
-// Split into lines and process
-let lines = code.split('\n');
-let result = [];
-
-for (let line of lines) {
-  // Trim whitespace
-  line = line.trim();
-  // Skip empty lines
-  if (line) {
-    result.push(line);
-  }
-}
-
-code = result.join('\n');
-
-// Restore strings
-code = code.replace(/__STR_(\d+)__/g, (match, idx) => {
-  return strings[parseInt(idx)];
+// Protect template literals first (they can contain newlines)
+code = code.replace(/`[^`]*`/g, (match) => {
+  strings.push(match);
+  return placeholder();
 });
 
-// Ensure newline at end
-if (!code.endsWith('\n')) {
-  code += '\n';
-}
+// Protect single-quoted strings
+code = code.replace(/'[^'\\]*(?:\\.[^'\\]*)*'/g, (match) => {
+  strings.push(match);
+  return placeholder();
+});
 
+// Protect double-quoted strings
+code = code.replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, (match) => {
+  strings.push(match);
+  return placeholder();
+});
+
+// Step 2: Remove comments
+code = code.replace(/\/\/.*$/gm, '');
+code = code.replace(/\/\*[\s\S]*?\*\//g, '');
+
+// Step 3: Replace all whitespace with single spaces
+code = code.replace(/\s+/g, ' ');
+
+// Step 4: Remove spaces around operators and punctuation where safe
+code = code.replace(/\s*([{}();,?:+\-*/%=<>!&|])\s*/g, '$1');
+code = code.replace(/\s*===\s*/g, '===');
+code = code.replace(/\s*!==\s*/g, '!==');
+code = code.replace(/\s*&&\s*/g, '&&');
+code = code.replace(/\s*\|\|\s*/g, '||');
+code = code.replace(/\s*=>\s*/g, '=>');
+
+// Step 5: Trim
+code = code.trim();
+
+// Step 6: Restore strings
+code = code.replace(/__S(\d+)__/g, (match, idx) => strings[parseInt(idx)]);
+
+// Step 7: Write to file
 fs.writeFileSync(MIN_OUTPUT, code);
 
-console.log('✓ main.js created (minified)');
+console.log('✓ main.js created (minified to single line)');
 console.log('');
 
 // Verify with ls -la

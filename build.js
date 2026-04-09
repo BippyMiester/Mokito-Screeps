@@ -159,8 +159,8 @@ minCode = minCode.replace(/\s*!==\s*/g, '!==');
 minCode = minCode.replace(/\s*\|\|\s*/g, '||');
 minCode = minCode.replace(/\s*\u0026\u0026\s*/g, '&&');
 
-// Remove console logs
-minCode = minCode.replace(/console\.log\([^)]*\);/g, '');
+// Keep console logs for debugging visibility
+// minCode = minCode.replace(/console\.log\([^)]*\);/g, '');
 
 // Clean up
 minCode = minCode.replace(/;+/g, ';');

@@ -37,17 +37,17 @@ class ConstructionManager {
         }
         
         if (rcl >= 3) {
-            this.buildContainers(room); // Phase 4: Containers at sources
-            this.buildTower(room);
+            this.buildContainers(room); // Phase 4: Containers at sources (RCL 3 unlocks containers)
+            this.buildTower(room); // Phase 7: Towers (RCL 3 unlocks 1 tower)
         }
         
         if (rcl >= 4) {
-            this.buildStorage(room);
-            this.buildRamparts(room); // Build ramparts around spawn
+            this.buildStorage(room); // Phase 8: Storage (RCL 4 unlocks storage)
+            this.buildRamparts(room); // Phase 6: Ramparts (RCL 4 unlocks ramparts)
         }
         
         if (rcl >= 5) {
-            this.buildWalls(room); // Build walls for outer defense
+            this.buildWalls(room); // Phase 6+: Walls at exits (RCL 5+)
         }
     }
     

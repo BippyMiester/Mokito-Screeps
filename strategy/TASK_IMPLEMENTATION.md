@@ -1,6 +1,6 @@
 # Implementation Task List - Prioritized
 
-## Current Status: Phases 0-3 COMPLETE ✅
+## Current Status: Phases 0-8 COMPLETE ✅
 
 | Phase | Status | Completion | Notes |
 |-------|--------|------------|-------|
@@ -8,12 +8,28 @@
 | 1 - Foundation | ✅ COMPLETE | 100% | Harvester, Runner, basic spawning |
 | 2 - Stabilization | ✅ COMPLETE | 100% | Upgrader, Builder roles |
 | 3 - Capacity | ✅ COMPLETE | 100% | Extension construction |
-| 4 - Efficiency | 🔄 IN PROGRESS | 50% | Stationary harvesting, containers |
-| 5 - Infrastructure | ⏳ PENDING | 0% | Road networks |
-| 6-8 - Defense | ⏳ PENDING | 0% | Ramparts, towers, defense roles |
+| 4 - Efficiency | ✅ COMPLETE | 100% | Stationary harvesting, containers |
+| 5 - Infrastructure | ✅ COMPLETE | 100% | Road networks |
+| 6 - Defense (Ramparts) | ✅ COMPLETE | 100% | Ramparts around critical structures |
+| 7 - Defense (Towers) | ✅ COMPLETE | 100% | Tower construction (RCL 3+) |
+| 8 - Storage | ✅ COMPLETE | 100% | Storage construction (RCL 4+) |
 | 9-20 | ⏳ PENDING | 0% | Expansion, military, endgame |
 
-**Latest Update:** 2026-04-09 - Phases 0-3 100% complete, ready for Phase 4
+**Latest Update:** 2026-04-09 - Phases 0-8 100% complete, ready for Phase 9
+
+### Phase Trigger Conditions
+
+| Phase | Name | Trigger Condition | RCL Required |
+|-------|------|-------------------|--------------|
+| 0 | Emergency | Harvesters < 2 | RCL 1 |
+| 1 | Foundation | Runners < ceil(harvesters/2) | RCL 1 |
+| 2 | Stabilization | Upgraders < 1 | RCL 1-2 |
+| 3 | Capacity | Harvesters < sourcePositions OR Builders < 1 | RCL 2 |
+| 4 | Efficiency | Stationary mode not yet enabled OR Containers < sources | RCL 2+ (harvesters >= positions) |
+| 5 | Infrastructure | Roads < 10 | RCL 3 |
+| 6 | Defense | Ramparts < 1 | RCL 4 |
+| 7 | Towers | Towers < maxTowers | RCL 3 |
+| 8 | Storage | Storage not built | RCL 4 |
 
 ---
 
@@ -113,60 +129,73 @@ This document provides a detailed, prioritized task list for implementing the co
 
 ## HIGH PRIORITY - Phase 4-8
 
-### Task 2.1: Stationary Harvesting
-**Priority: HIGH** | **Phase: 4** | **Time: 4 hours**
+### Task 2.1: Stationary Harvesting ✅ COMPLETE
+**Priority: HIGH** | **Phase: 4** | **Time: 4 hours** | **Status: DONE**
 
-- [ ] Stationary mode for harvesters
-- [ ] Container construction at sources
-- [ ] Drop energy instead of deliver
-- [ ] Room mode switching
+- [x] Stationary mode for harvesters (triggers when RCL >= 2 AND harvesters >= positions)
+- [x] Container construction at sources (RCL 3)
+- [x] Drop energy instead of deliver (in stationary mode)
+- [x] Room mode switching (traditional vs stationary)
+- [x] Fixed: No longer triggers in Phase 3, requires RCL >= 2
 
-**Testing:** Harvesters stay at sources
-
----
-
-### Task 2.2: Road Construction
-**Priority: HIGH** | **Phase: 5** | **Time: 3 hours**
-
-- [ ] Spawn → sources roads
-- [ ] Spawn → controller roads
-- [ ] Road maintenance
-
-**Testing:** Reduced move fatigue
+**Implementation Date:** 2026-04-09
+**Files Modified:** `src/roles/Harvester.js`, `src/managers/ConstructionManager.js`, `src/roles/Runner.js`
+**Testing:** Harvesters stay at sources when all positions filled and RCL >= 2
 
 ---
 
-### Task 2.3: Storage System
-**Priority: HIGH** | **Phase: 7** | **Time: 3 hours**
+### Task 2.2: Road Construction ✅ COMPLETE
+**Priority: HIGH** | **Phase: 5** | **Time: 3 hours** | **Status: DONE**
 
-- [ ] Storage construction (RCL 4)
-- [ ] Link placement preparation
-- [ ] Energy balancing
+- [x] Spawn → sources roads
+- [x] Spawn → controller roads (fixed: no longer builds on controller position)
+- [x] Roads between sources
+- [x] Road maintenance (handled by Repairer role)
 
-**Testing:** Storage fills and buffers energy
+**Implementation Date:** 2026-04-09
+**Files Modified:** `src/managers/ConstructionManager.js`
+**Testing:** Roads reduce move fatigue
 
 ---
 
-### Task 2.4: Defense Foundation
-**Priority: HIGH** | **Phase: 8** | **Time: 5 hours**
+### Task 2.3: Storage System ✅ COMPLETE
+**Priority: HIGH** | **Phase: 8** | **Time: 3 hours** | **Status: DONE**
 
-- [ ] Rampart construction
-- [ ] First tower construction
-- [ ] Tower defense logic
-- [ ] Threat detection
+- [x] Storage construction at RCL 4
+- [x] Link placement preparation (Phase 9)
+- [x] Energy balancing via Runner role
 
+**Implementation Date:** 2026-04-09
+**Files Modified:** `src/managers/ConstructionManager.js`
+**Testing:** Storage built at RCL 4
+
+---
+
+### Task 2.4: Defense Foundation ✅ COMPLETE
+**Priority: HIGH** | **Phase: 6-7** | **Time: 5 hours** | **Status: DONE**
+
+- [x] Rampart construction (RCL 4)
+- [x] First tower construction (RCL 3)
+- [x] Tower defense logic (auto-targets hostiles)
+- [x] Threat detection (via RoomManager)
+- [x] Fixed: Walls at room exits (RCL 5+)
+
+**Implementation Date:** 2026-04-09
+**Files Modified:** `src/managers/ConstructionManager.js`, `src/managers/RoomManager.js`, `src/roles/Defender.js`
 **Testing:** Room defended against attacks
 
 ---
 
-### Task 2.5: Repairer Role
-**Priority: HIGH** | **Phase: 8** | **Time: 2 hours**
+### Task 2.5: Repairer Role ✅ COMPLETE
+**Priority: HIGH** | **Phase: 8** | **Time: 2 hours** | **Status: DONE**
 
-- [ ] Create `src/roles/Repairer.js`
-- [ ] Repair roads, containers, ramparts
-- [ ] Defense priority
-- [ ] Idle upgrading
+- [x] Create `src/roles/Repairer.js`
+- [x] Repair roads, containers, ramparts
+- [x] Defense priority (ramparts/walls first)
+- [x] Idle upgrading when nothing to repair
 
+**Implementation Date:** 2026-04-09
+**Files Modified:** `src/roles/Repairer.js`
 **Testing:** Structures maintained
 
 ---

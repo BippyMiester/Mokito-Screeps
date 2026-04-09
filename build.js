@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * Build script for Mokito bot - Proper minification
+ * Build script for Mokito bot using terser
  */
 
 const fs = require('fs');
 const path = require('path');
+const { minify } = require('terser');
 
 const FULL_OUTPUT = path.join(__dirname, 'main-full.js');
 const MIN_OUTPUT = path.join(__dirname, 'main.js');
@@ -63,68 +64,48 @@ fullOutput += "    }\n";
 fullOutput += "    global.MokitoInstance.run();\n";
 fullOutput += "};\n";
 
+// Write full version
 fs.writeFileSync(FULL_OUTPUT, fullOutput);
 console.log('');
 console.log('✓ main-full.js created');
 
-// Minification - collapse to single line
+// Minify with terser
 console.log('');
-console.log('Minimizing...');
+console.log('Minimizing with terser...');
 
-let code = fullOutput;
-
-// Step 1: Protect all strings by replacing with placeholders
-const strings = [];
-let strIdx = 0;
-const placeholder = () => `__S${strIdx++}__`;
-
-// Protect template literals first (they can contain newlines)
-code = code.replace(/`[^`]*`/g, (match) => {
-  strings.push(match);
-  return placeholder();
+minify(fullOutput, {
+  compress: {
+    drop_console: false,  // Keep console.log
+    drop_debugger: true,
+    dead_code: true,
+    unused: true,
+  },
+  mangle: {
+    keep_classnames: false,
+    keep_fnames: false,
+  },
+  format: {
+    comments: false,  // Remove all comments
+    beautify: false,
+    semicolons: true,
+  },
+}).then(result => {
+  if (result.error) {
+    console.error('Minification error:', result.error);
+    process.exit(1);
+  }
+  
+  fs.writeFileSync(MIN_OUTPUT, result.code);
+  
+  console.log('✓ main.js created (minified)');
+  console.log('');
+  
+  // Show file sizes
+  const { execSync } = require('child_process');
+  const output = execSync('ls -la main*.js', { cwd: __dirname, encoding: 'utf8' });
+  console.log('File sizes:');
+  console.log(output);
+}).catch(err => {
+  console.error('Build failed:', err);
+  process.exit(1);
 });
-
-// Protect single-quoted strings
-code = code.replace(/'[^'\\]*(?:\\.[^'\\]*)*'/g, (match) => {
-  strings.push(match);
-  return placeholder();
-});
-
-// Protect double-quoted strings
-code = code.replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, (match) => {
-  strings.push(match);
-  return placeholder();
-});
-
-// Step 2: Remove comments
-code = code.replace(/\/\/.*$/gm, '');
-code = code.replace(/\/\*[\s\S]*?\*\//g, '');
-
-// Step 3: Replace all whitespace with single spaces
-code = code.replace(/\s+/g, ' ');
-
-// Step 4: Remove spaces around operators and punctuation where safe
-code = code.replace(/\s*([{}();,?:+\-*/%=<>!&|])\s*/g, '$1');
-code = code.replace(/\s*===\s*/g, '===');
-code = code.replace(/\s*!==\s*/g, '!==');
-code = code.replace(/\s*&&\s*/g, '&&');
-code = code.replace(/\s*\|\|\s*/g, '||');
-code = code.replace(/\s*=>\s*/g, '=>');
-
-// Step 5: Trim
-code = code.trim();
-
-// Step 6: Restore strings
-code = code.replace(/__S(\d+)__/g, (match, idx) => strings[parseInt(idx)]);
-
-// Step 7: Write to file
-fs.writeFileSync(MIN_OUTPUT, code);
-
-console.log('✓ main.js created (minified to single line)');
-console.log('');
-
-// Verify with ls -la
-console.log('File sizes:');
-const { execSync } = require('child_process');
-const output = execSync('ls -la main*.js', { cwd: __dirname, encoding: 'utf8' });
-console.log(output);

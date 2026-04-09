@@ -25,6 +25,6 @@
   "author": "BippyMiester",
   "license": "MIT",
   "devDependencies": {
-    "terser": "^5.31.0"
+    "terser": "^5.46.1"
   }
 }

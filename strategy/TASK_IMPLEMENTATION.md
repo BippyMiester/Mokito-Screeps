@@ -8,7 +8,7 @@
 | 1 - Foundation | ✅ COMPLETE | 100% | Harvester, Runner, basic spawning |
 | 2 - Stabilization | ✅ COMPLETE | 100% | Upgrader, Builder roles |
 | 3 - Capacity | ✅ COMPLETE | 100% | Extension construction |
-| 4 - Efficiency | 🔄 NEXT | 0% | Stationary harvesting, containers |
+| 4 - Efficiency | 🔄 IN PROGRESS | 50% | Stationary harvesting, containers |
 | 5 - Infrastructure | ⏳ PENDING | 0% | Road networks |
 | 6-8 - Defense | ⏳ PENDING | 0% | Ramparts, towers, defense roles |
 | 9-20 | ⏳ PENDING | 0% | Expansion, military, endgame |

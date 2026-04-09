@@ -47,8 +47,8 @@ class Harvester {
             totalPositions += this.countOpenPositions(source);
         }
         
-        // Switch to stationary when we have harvesters >= positions
-        if (harvesters.length >= totalPositions) {
+        // Switch to stationary when we have harvesters >= positions AND RCL >= 2 (Phase 4)
+        if (harvesters.length >= totalPositions && room.controller.level >= 2) {
             if (Memory.rooms[room.name].harvesterMode !== 'stationary') {
                 // Silently switch to stationary mode
                 Memory.rooms[room.name].harvesterMode = 'stationary';

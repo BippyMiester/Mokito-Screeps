@@ -37,6 +37,7 @@ class ConstructionManager {
         }
         
         if (rcl >= 3) {
+            this.buildContainers(room); // Phase 4: Containers at sources
             this.buildTower(room);
         }
         
@@ -48,6 +49,99 @@ class ConstructionManager {
         if (rcl >= 5) {
             this.buildWalls(room); // Build walls for outer defense
         }
+    }
+    
+    /**
+     * Phase 4: Build containers at sources for stationary harvesting
+     */
+    buildContainers(room) {
+        const sources = room.find(FIND_SOURCES);
+        const containers = room.find(FIND_STRUCTURES, {
+            filter: { structureType: STRUCTURE_CONTAINER }
+        });
+        const sites = room.find(FIND_CONSTRUCTION_SITES, {
+            filter: { structureType: STRUCTURE_CONTAINER }
+        });
+        
+        const totalNeeded = sources.length;
+        const currentCount = containers.length + sites.length;
+        
+        if (currentCount >= totalNeeded) return;
+        
+        // Build containers at sources
+        for (const source of sources) {
+            // Check if source already has a container nearby
+            const nearbyContainers = source.pos.findInRange(FIND_STRUCTURES, 2, {
+                filter: { structureType: STRUCTURE_CONTAINER }
+            });
+            const nearbySites = source.pos.findInRange(FIND_CONSTRUCTION_SITES, 2, {
+                filter: { structureType: STRUCTURE_CONTAINER }
+            });
+            
+            if (nearbyContainers.length === 0 && nearbySites.length === 0) {
+                // Find a good position for the container
+                const pos = this.findContainerPosition(source);
+                if (pos) {
+                    pos.createConstructionSite(STRUCTURE_CONTAINER);
+                    console.log('📦 Building container at source ' + source.id);
+                    return;
+                }
+            }
+        }
+    }
+    
+    /**
+     * Find best position for a container near a source
+     * Prioritizes positions close to the source and with road access
+     */
+    findContainerPosition(source) {
+        const room = source.room;
+        const terrain = room.getTerrain();
+        let bestPos = null;
+        let bestScore = -Infinity;
+        
+        // Check all positions within 1 tile of source
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                
+                const x = source.pos.x + dx;
+                const y = source.pos.y + dy;
+                
+                if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+                if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+                
+                const pos = new RoomPosition(x, y, room.name);
+                
+                // Check if position is blocked
+                const structures = pos.lookFor(LOOK_STRUCTURES);
+                if (structures.length > 0) continue;
+                
+                const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+                if (sites.length > 0) continue;
+                
+                // Calculate score (closer to spawn is better)
+                const spawn = room.find(FIND_MY_SPAWNS)[0];
+                let score = 0;
+                
+                // Distance from source (prefer 1 tile away)
+                const distToSource = Math.abs(dx) + Math.abs(dy);
+                score += (3 - distToSource) * 10;
+                
+                // Distance to spawn (closer is better)
+                if (spawn) {
+                    const distToSpawn = pos.getRangeTo(spawn);
+                    score -= distToSpawn * 2;
+                }
+                
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestPos = pos;
+                }
+            }
+        }
+        
+        return bestPos;
     }
     
     buildEssentials(room, spawn) {
@@ -379,6 +473,9 @@ class ConstructionManager {
         let placed = 0;
         for (const step of path) {
             const pos = new RoomPosition(step.x, step.y, room.name);
+            
+            // Skip the target position (controller, spawn, etc.)
+            if (step.x === toPos.x && step.y === toPos.y) continue;
             
             // Skip positions with structures
             const structures = pos.lookFor(LOOK_STRUCTURES);

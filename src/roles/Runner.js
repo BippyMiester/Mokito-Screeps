@@ -96,7 +96,21 @@ class Runner {
     }
 
     collectEnergy(creep) {
-        // Priority 1: Dropped energy near sources (from stationary harvesters)
+        // Priority 1: Containers at sources (Phase 4+)
+        const container = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER && s.store[RESOURCE_ENERGY] > 0
+        });
+        
+        if (container) {
+            if (creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(container, {
+                    visualizePathStyle: { stroke: '#ffaa00' }
+                });
+            }
+            return;
+        }
+        
+        // Priority 2: Dropped energy near sources (from stationary harvesters)
         const droppedEnergy = creep.pos.findClosestByPath(FIND_DROPPED_RESOURCES, {
             filter: (resource) => resource.resourceType === RESOURCE_ENERGY && resource.amount >= 50
         });

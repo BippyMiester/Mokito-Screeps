@@ -3,22 +3,22 @@
 /**
  * SpawnManager - Manages creep spawning with priority system
  * 
- * Phase 1 (Early Game): 
- *   - Spawn 2 harvesters (deliver to spawn)
- *   - Then spawn 1 upgrader (self-mines)
- * Phase 2 (Filling Harvesters):
- *   - Continue spawning harvesters until all source positions filled
- * Phase 3 (Stationary Mode):
- *   - Once harvesters >= source positions, switch to stationary mode
- *   - Spawn Runners to move energy from drops to spawn (1 runner per 2 harvesters)
- *   - Then spawn Upgraders (1:1 ratio with harvesters)
- * Phase 4 (Builders/Repairers):
- *   - Only after harvesters, runners, and upgraders are complete
- *   - Ratio: 1 builder : 2 repairers
- *   - Max: 3 builders, 4 repairers
- * Emergency: 
- *   - If harvesters drop below 2, revert to Phase 1
- *   - Pause other spawning until harvesters rebuilt
+ * SPAWN PRIORITY ORDER (highest to lowest):
+ * 1. EMERGENCY: Harvesters (if < 2)
+ * 2. CRITICAL: Runners (if stationary mode and none exist)
+ * 3. ESSENTIAL: Harvesters up to minimum needed
+ * 4. CORE: Runners, Upgraders (1:1 with harvesters)
+ * 5. MAINTENANCE: Builders, Repairers
+ * 6. EXPANSION: Remote Harvesters, Haulers, Claimers
+ * 
+ * SMART REPLACEMENT:
+ * - Track dying creeps and pre-spawn replacements
+ * - Use smaller bodies when creep counts are low (faster spawn)
+ * - Never wait for full energy if critical roles are missing
+ * 
+ * PHASE-AGNOSTIC SPAWNING:
+ * - Spawning continues based on actual needs, not phase
+ * - Phase is for tracking, not for blocking
  */
 class SpawnManager {
     run(room) {

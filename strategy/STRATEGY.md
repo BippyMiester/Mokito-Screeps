@@ -8,18 +8,18 @@ This document outlines a comprehensive 20-phase strategy for dominating the Scre
 
 ## Phase Overview Table
 
-| Phase | Name | Focus | Key Technologies | Timeframe |
+| Phase | Name | Focus | Key Technologies | Status |
 |-------|------|-------|-------------------|-----------|
-| 0 | Emergency Mode | Survive with minimal creeps | N/A | Ticks 0-100 |
-| 1 | Basic Harvesting | Establish energy flow | Harvester/Runner | RCL 1-2 |
-| 2 | First Spawn | Stabilize room economy | Upgrader | RCL 2 |
-| 3 | Extension Build | Increase energy capacity | Builder | RCL 2 |
-| 4 | Stationary Harvesting | Optimize energy extraction | Container mining | RCL 3 |
-| 5 | Road Networks | Movement efficiency | Construction | RCL 3 |
-| 6 | Remote Mining 1 | Expand beyond spawn room | RemoteHarvester | RCL 3-4 |
-| 7 | Storage System | Buffer resources | Storage, Links | RCL 4 |
-| 8 | Defense Foundations | Basic room protection | Ramparts, Towers | RCL 4 |
-| 9 | First Expansion | Multi-room control | Claimer | RCL 4-5 |
+| 0 | Emergency Mode | Survive with minimal creeps | N/A | ✅ COMPLETE |
+| 1 | Basic Harvesting | Establish energy flow | Harvester/Runner | ✅ COMPLETE |
+| 2 | First Spawn | Stabilize room economy | Upgrader | ✅ COMPLETE |
+| 3 | Extension Build | Increase energy capacity | Builder | ✅ COMPLETE |
+| 4 | Stationary Harvesting | Optimize energy extraction | Container mining | ✅ COMPLETE |
+| 5 | Road Networks | Movement efficiency | Construction | ✅ COMPLETE |
+| 6 | Defense Foundations | Basic room protection | Ramparts, Towers | ✅ COMPLETE |
+| 7 | Storage System | Buffer resources | Storage, Links | ✅ COMPLETE |
+| 8 | Remote Mining 1 | Expand beyond spawn room | RemoteHarvester | ✅ COMPLETE |
+| 9 | First Expansion | Multi-room control | Claimer | 🔄 IN PROGRESS |
 | 10 | Military Awakening | Basic defense force | Defender | RCL 5 |
 | 11 | Scout Network | Intelligence gathering | Scout | RCL 5 |
 | 12 | Squad Warfare | Coordinated attacks | Attack Squads | RCL 5-6 |
@@ -90,45 +90,78 @@ This document outlines a comprehensive 20-phase strategy for dominating the Scre
 
 ---
 
-### Phase 4: Stationary Harvesting (RCL 3)
+### Phase 4: Stationary Harvesting (RCL 3) ✅ COMPLETE
 **Goal:** Achieve maximum mining efficiency
-**Implement:**
-- Container construction at sources
-- Dedicated harvesters per position around source
-- Harvesters drop energy, Runners collect
-- 2 WORK parts per source for full regeneration
+**Status:** FULLY IMPLEMENTED
 
-**From TooAngel:** Uses stationary sourcer roles with link/containers
-**From Overmind:** HiveClusters manage stationary mining
-**From Hivemind:** Bay managers handle source efficiency
+**Implementation Details:**
+- **Harvester.js**: Dual-mode system with `runTraditional()` and `runStationary()`
+  - Automatic mode switching via `getRoomMode()` based on RCL >= 2 and harvester count
+  - Position assignment system with obstacle avoidance (`moveToHarvestPosition`)
+  - Creep coordination with move requests for blocking creeps
+  - Harvest and drop logic with position caching
+- **Runner.js**: Optimized container collection
+  - Priority 1: Withdraw from containers at sources
+  - Priority 2: Pick up dropped energy from stationary harvesters
+  - Move request system for obstacle avoidance
+- **ConstructionManager.js**: `buildContainers()` method
+  - Container placement within 1-2 tiles of sources
+  - Position scoring based on distance to spawn and source
 
 **Key Metrics:**
 - 10 energy per tick per source (2 WORK parts)
 - Zero move fatigue at source positions
 - Container proximity: 1-2 tiles from source
+- Mode trigger: RCL >= 2 AND harvesters >= total source positions
+
+**From TooAngel:** Uses stationary sourcer roles with link/containers
+**From Overmind:** HiveClusters manage stationary mining
+**From Hivemind:** Bay managers handle source efficiency
 
 ---
 
-### Phase 5: Road Networks (RCL 3)
+### Phase 5: Road Networks (RCL 3) ✅ COMPLETE
 **Goal:** Minimize movement costs
-**Implement:**
-- Roads from spawn → sources
-- Roads from spawn → controller
-- Roads between sources for Runner efficiency
+**Status:** FULLY IMPLEMENTED
 
-**Strategic Note:**
+**Implementation Details:**
+- **ConstructionManager.js**: `buildEssentials()` and `buildRoad()` methods
+  - Roads from spawn to sources (Priority 1)
+  - Roads from spawn to controller (Priority 2)
+  - Roads between sources (Priority 3)
+  - Roads from sources to controller (Priority 4)
+  - Defensive grid around spawn (Priority 5)
+- Uses `findPathTo()` with `ignoreCreeps: true` for optimal placement
+- Skips building roads on target positions (spawn, controller, etc.)
+- Limits to 3 roads per tick to prevent overwhelming builders
+
+**Key Metrics:**
 - Roads reduce move fatigue by 50%
-- Critical for economy scaling
 - Automated placement using pathfinding
+- Integrated with ConstructionManager priority system
 
 ---
 
-### Phase 6: Remote Mining 1 (RCL 3-4)
+### Phase 6: Remote Mining 1 (RCL 3-4) ✅ COMPLETE
 **Goal:** Expand energy extraction beyond spawn room
-**Implement:**
-- RemoteHarvester role (travel to adjacent rooms)
-- Container building in remote rooms
-- Hauler role for long-distance transport
+**Status:** FULLY IMPLEMENTED
+
+**Implementation Details:**
+- **RemoteHarvester.js**: Multi-room mining with container building
+  - Travels to adjacent rooms with sources
+  - Builds containers at remote sources
+  - Returns to home room when energy full
+  - Handles hostile room detection
+- **Hauler.js**: Long-distance energy transport
+  - Collects from remote containers
+  - Delivers to home room storage/spawn
+  - Efficient body composition (CARRY-heavy)
+- **Claimer.js**: Room reservation and claiming
+  - CLAIM part for controller reservation
+  - Room claiming for expansion
+- **SpawnManager.js**: Remote worker spawning
+  - `spawnRemoteHarvester()`, `spawnHauler()`, `spawnClaimer()` methods
+  - Dynamic body scaling based on available energy
 
 **Unlocks:**
 - Containers (RCL 3)
@@ -139,12 +172,25 @@ This document outlines a comprehensive 20-phase strategy for dominating the Scre
 
 ---
 
-### Phase 7: Storage System (RCL 4)
+### Phase 7: Storage System (RCL 4) ✅ COMPLETE
 **Goal:** Buffer resources for burst spending
-**Implement:**
-- Storage construction
-- Link network (connect spawn-storage-controller)
-- Energy balancing between storage and spawn/extensions
+**Status:** FULLY IMPLEMENTED
+
+**Implementation Details:**
+- **ConstructionManager.js**: `buildStorage()` and `placeStorageNear()` methods
+  - Storage placed 2 tiles from spawn
+  - Construction triggered automatically at RCL 4
+- **Runner.js**: Storage integration
+  - Priority delivery to spawn/extensions first
+  - Fallback to storage when spawn/extensions are full
+  - Collection from storage when other sources are empty
+- **RoomManager.js**: Storage monitoring and utilization
+  - Tracks storage levels
+  - Adjusts spawning priorities based on storage state
+
+**Link Preparation:**
+- Link placement logic prepared for Phase 9
+- Position calculation for spawn-storage-controller triangle
 
 **Unlocks:**
 - 1 million energy storage capacity
@@ -156,12 +202,30 @@ This document outlines a comprehensive 20-phase strategy for dominating the Scre
 
 ---
 
-### Phase 8: Defense Foundations (RCL 4)
+### Phase 8: Defense Foundations (RCL 4) ✅ COMPLETE
 **Goal:** Basic room protection
-**Implement:**
-- Ramparts around critical structures (spawn, controller, storage)
-- First tower construction
-- Defender role for hostile response
+**Status:** FULLY IMPLEMENTED
+
+**Implementation Details:**
+- **ConstructionManager.js**: 
+  - `buildRamparts()` - 3x3 ramparts around spawn, controller, towers
+  - `buildTower()` - Tower construction at RCL 3+
+  - `buildWalls()` - Exit wall construction at RCL 5+
+- **RoomManager.js**: Defense coordination
+  - `updateDefenseStatus()` - Hostile detection and attack timer
+  - `runTowerDefense()` - Tower AI with threat prioritization
+  - Threat scoring: Healers (100+) > Ranged (50+) > Melee (30+) > Workers (10+)
+  - Auto-repair damaged structures when no hostiles present
+- **Defender.js**: Melee defense role
+  - `findPriorityTarget()` - Smart target selection
+  - `engageTarget()` - Attack and movement coordination
+  - `retreatIfPossible()` - Self-preservation at <50% health
+  - Rally point behavior when no enemies
+
+**Tower Logic:**
+- Attack: Prioritizes healers, then ranged/melee attackers
+- Repair: Damaged structures (<75% health)
+- Defense: Walls/ramparts (<100k hits) when energy >80%
 
 **From TooAngel:** Automatic defense with tower logic and defender spawning
 **From Overmind:** Directive-based defense system

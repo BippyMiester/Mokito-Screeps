@@ -11,25 +11,27 @@
 | 4 - Efficiency | ✅ COMPLETE | 100% | Stationary harvesting, containers |
 | 5 - Infrastructure | ✅ COMPLETE | 100% | Road networks |
 | 6 - Defense (Ramparts) | ✅ COMPLETE | 100% | Ramparts around critical structures |
-| 7 - Defense (Towers) | ✅ COMPLETE | 100% | Tower construction (RCL 3+) |
-| 8 - Storage | ✅ COMPLETE | 100% | Storage construction (RCL 4+) |
-| 9-20 | ⏳ PENDING | 0% | Expansion, military, endgame |
+| 7 - Defense (Towers) | ✅ COMPLETE | 100% | Tower construction (RCL 3+), tower AI |
+| 8 - Storage | ✅ COMPLETE | 100% | Storage construction (RCL 4+), energy balancing |
+| 9 - Remote Mining | ✅ COMPLETE | 100% | RemoteHarvester, Hauler, Claimer |
+| 10 | 🔄 IN PROGRESS | 0% | Scout network, military squads |
 
 **Latest Update:** 2026-04-09 - Phases 0-8 100% complete, ready for Phase 9
 
 ### Phase Trigger Conditions
 
-| Phase | Name | Trigger Condition | RCL Required |
-|-------|------|-------------------|--------------|
-| 0 | Emergency | Harvesters < 2 | RCL 1 |
-| 1 | Foundation | Runners < ceil(harvesters/2) | RCL 1 |
-| 2 | Stabilization | Upgraders < 1 | RCL 1-2 |
-| 3 | Capacity | Harvesters < sourcePositions OR Builders < 1 | RCL 2 |
-| 4 | Efficiency | Stationary mode not yet enabled OR Containers < sources | RCL 2+ (harvesters >= positions) |
-| 5 | Infrastructure | Roads < 10 | RCL 3 |
-| 6 | Defense | Ramparts < 1 | RCL 4 |
-| 7 | Towers | Towers < maxTowers | RCL 3 |
-| 8 | Storage | Storage not built | RCL 4 |
+| Phase | Name | Trigger Condition | RCL Required | Status |
+|-------|------|-------------------|--------------|--------|
+| 0 | Emergency | Harvesters < 2 | RCL 1 | ✅ COMPLETE |
+| 1 | Foundation | Runners < ceil(harvesters/2) | RCL 1 | ✅ COMPLETE |
+| 2 | Stabilization | Upgraders < 1 | RCL 1-2 | ✅ COMPLETE |
+| 3 | Capacity | Harvesters < sourcePositions OR Builders < 1 | RCL 2 | ✅ COMPLETE |
+| 4 | Efficiency | Stationary mode enabled, Containers built at sources | RCL 2+ | ✅ COMPLETE |
+| 5 | Infrastructure | Roads from spawn→sources→controller | RCL 3 | ✅ COMPLETE |
+| 6 | Defense | Ramparts around spawn/controller/towers | RCL 4 | ✅ COMPLETE |
+| 7 | Towers | Towers built, tower defense AI active | RCL 3+ | ✅ COMPLETE |
+| 8 | Storage | Storage built, energy balancing via Runners | RCL 4 | ✅ COMPLETE |
+| 9 | Remote Mining | Remote rooms scouted, harvesters/haulers assigned | RCL 3+ | ✅ COMPLETE |
 
 ---
 
@@ -132,57 +134,111 @@ This document provides a detailed, prioritized task list for implementing the co
 ### Task 2.1: Stationary Harvesting ✅ COMPLETE
 **Priority: HIGH** | **Phase: 4** | **Time: 4 hours** | **Status: DONE**
 
-- [x] Stationary mode for harvesters (triggers when RCL >= 2 AND harvesters >= positions)
-- [x] Container construction at sources (RCL 3)
-- [x] Drop energy instead of deliver (in stationary mode)
-- [x] Room mode switching (traditional vs stationary)
-- [x] Fixed: No longer triggers in Phase 3, requires RCL >= 2
+**Implementation:**
+- ✅ **Harvester.js** - Dual-mode system with automatic switching
+  - `runTraditional()` - Deliver energy to spawn/extensions
+  - `runStationary()` - Drop energy at source position
+  - `getRoomMode()` - Automatic mode switching at RCL >= 2 + harvesters >= positions
+  - Position assignment with obstacle avoidance
+  - Move request system for blocking creeps
+- ✅ **Runner.js** - Container collection optimization
+  - Withdraw from containers (Priority 1)
+  - Pick up dropped energy (Priority 2)
+  - Storage fallback (Priority 3)
+- ✅ **ConstructionManager.js** - `buildContainers()` method
+  - Container placement 1-2 tiles from sources
+  - Position scoring for spawn proximity
+
+**Key Features:**
+- 10 energy per tick per source (2 WORK parts)
+- Zero move fatigue at source positions
+- Automatic mode switching with emergency fallback
+- Creep coordination for position conflicts
 
 **Implementation Date:** 2026-04-09
 **Files Modified:** `src/roles/Harvester.js`, `src/managers/ConstructionManager.js`, `src/roles/Runner.js`
-**Testing:** Harvesters stay at sources when all positions filled and RCL >= 2
 
 ---
 
 ### Task 2.2: Road Construction ✅ COMPLETE
 **Priority: HIGH** | **Phase: 5** | **Time: 3 hours** | **Status: DONE**
 
-- [x] Spawn → sources roads
-- [x] Spawn → controller roads (fixed: no longer builds on controller position)
-- [x] Roads between sources
-- [x] Road maintenance (handled by Repairer role)
+**Implementation:**
+- ✅ **ConstructionManager.js** - Road network system
+  - `buildRoad()` - Pathfinding-based road construction
+  - `buildEssentials()` - Prioritized road building
+  - Spawn → sources (Priority 1)
+  - Spawn → controller (Priority 2) - Fixed to not build on controller
+  - Sources → controller (Priority 3)
+  - Defensive grid around spawn (Priority 4)
+- ✅ **Repairer.js** - Road maintenance
+  - Repairs roads below 50% health
+  - Integrated with general repair logic
+
+**Key Features:**
+- 50% move fatigue reduction on roads
+- 3 roads per tick limit to prevent overwhelming builders
+- Path reuses existing roads via `ignoreRoads: false`
 
 **Implementation Date:** 2026-04-09
-**Files Modified:** `src/managers/ConstructionManager.js`
-**Testing:** Roads reduce move fatigue
+**Files Modified:** `src/managers/ConstructionManager.js`, `src/roles/Repairer.js`
+**Testing:** Roads reduce move fatigue, paths connect key areas
 
 ---
 
 ### Task 2.3: Storage System ✅ COMPLETE
 **Priority: HIGH** | **Phase: 8** | **Time: 3 hours** | **Status: DONE**
 
-- [x] Storage construction at RCL 4
-- [x] Link placement preparation (Phase 9)
-- [x] Energy balancing via Runner role
+**Implementation:**
+- ✅ **ConstructionManager.js** - `buildStorage()` and `placeStorageNear()`
+  - Storage placement 2 tiles from spawn
+  - Construction triggered at RCL 4
+- ✅ **Runner.js** - Storage integration
+  - Delivers to spawn/extensions first
+  - Falls back to storage when full
+  - Collects from storage when other sources empty
+- ✅ **RoomManager.js** - Storage monitoring
+  - Tracks storage levels
+  - Adjusts spawning priorities based on storage state
+
+**Key Features:**
+- 1 million energy capacity
+- Buffer for expensive operations
+- Link preparation for Phase 9
 
 **Implementation Date:** 2026-04-09
-**Files Modified:** `src/managers/ConstructionManager.js`
-**Testing:** Storage built at RCL 4
+**Files Modified:** `src/managers/ConstructionManager.js`, `src/roles/Runner.js`, `src/managers/RoomManager.js`
+**Testing:** Storage built at RCL 4, energy balancing works
 
 ---
 
 ### Task 2.4: Defense Foundation ✅ COMPLETE
 **Priority: HIGH** | **Phase: 6-7** | **Time: 5 hours** | **Status: DONE**
 
-- [x] Rampart construction (RCL 4)
-- [x] First tower construction (RCL 3)
-- [x] Tower defense logic (auto-targets hostiles)
-- [x] Threat detection (via RoomManager)
-- [x] Fixed: Walls at room exits (RCL 5+)
+**Implementation:**
+- ✅ **ConstructionManager.js** - Defense structures
+  - `buildRamparts()` - 3x3 ramparts around spawn/controller/towers
+  - `buildTower()` - Tower placement at RCL 3+
+  - `buildWalls()` - Exit walls at RCL 5+
+- ✅ **RoomManager.js** - Defense coordination
+  - `updateDefenseStatus()` - Hostile detection, attack timer (20 ticks)
+  - `runTowerDefense()` - Tower AI with threat scoring
+  - Threat priority: Healers > Ranged > Melee > Workers
+  - Auto-repair structures when no hostiles
+- ✅ **Defender.js** - Melee defense role
+  - Smart target selection by threat level
+  - Attack/move coordination
+  - Retreat logic at <50% health
+  - Rally point behavior
+
+**Tower AI:**
+- Attack: Prioritizes healers, then ranged/melee
+- Repair: Structures <75% health
+- Defense: Walls/ramparts <100k hits when energy >80%
 
 **Implementation Date:** 2026-04-09
 **Files Modified:** `src/managers/ConstructionManager.js`, `src/managers/RoomManager.js`, `src/roles/Defender.js`
-**Testing:** Room defended against attacks
+**Testing:** Room defended against attacks, tower AI functional
 
 ---
 
@@ -202,27 +258,54 @@ This document provides a detailed, prioritized task list for implementing the co
 
 ## MEDIUM PRIORITY - Phase 9-13
 
-### Task 3.1: Scout Role
-**Priority: MEDIUM** | **Phase: 11** | **Time: 4 hours**
+### Task 3.1: Remote Mining ✅ COMPLETE
+**Priority: MEDIUM** | **Phase: 9** | **Time: 6 hours** | **Status: DONE**
 
-- [ ] Create `src/roles/Scout.js`
-- [ ] Room exploration algorithm
-- [ ] Intelligence gathering
-- [ ] Hostile room identification
+**Implementation:**
+- ✅ **RemoteHarvester.js** - Multi-room mining
+  - Travels to adjacent rooms with sources
+  - Builds containers at remote sources
+  - Returns to home room when energy full
+  - Hostile room detection and avoidance
+- ✅ **Hauler.js** - Long-distance transport
+  - Collects from remote containers
+  - Delivers to home room storage/spawn
+  - CARRY-heavy body for efficiency
+- ✅ **Claimer.js** - Room reservation and claiming
+  - CLAIM part for controller reservation
+  - Room claiming for expansion
+- ✅ **RoomManager.js** - Remote room management
+  - `scoutRemoteRooms()` - Automatic adjacent room discovery
+  - `updateRemoteAssignments()` - Source/harvester/hauler tracking
+  - `spawnRemoteWorkers()` - Dynamic need calculation
 
-**Testing:** Scout visits rooms, saves data
+**Key Features:**
+- Automatic room scouting every 100 ticks
+- Dynamic assignment tracking
+- Integration with SpawnManager for remote worker spawning
+
+**Implementation Date:** 2026-04-09
+**Files Modified:** `src/roles/RemoteHarvester.js`, `src/roles/Hauler.js`, `src/roles/Claimer.js`, `src/managers/RoomManager.js`, `src/managers/SpawnManager.js`
+**Testing:** Energy flows from remote rooms, assignments tracked correctly
 
 ---
 
-### Task 3.2: Remote Mining
-**Priority: MEDIUM** | **Phase: 6, 9** | **Time: 6 hours**
+### Task 3.2: Scout Role 🔄 IN PROGRESS
+**Priority: MEDIUM** | **Phase: 11** | **Time: 4 hours**
 
-- [ ] Create `src/roles/RemoteHarvester.js`
-- [ ] Travel to adjacent rooms
-- [ ] Build containers remotely
-- [ ] Create `src/roles/Hauler.js`
+**Status:** Role exists but needs enhancement
 
-**Testing:** Energy flows from remote rooms
+- [x] Create `src/roles/Scout.js` - Basic implementation exists
+- [ ] Enhance room exploration algorithm
+- [ ] Expand intelligence gathering (store more room data)
+- [ ] Hostile room identification and threat assessment
+
+**Current Implementation:**
+- Basic scout role exists
+- Used for room reservation checking
+- Integrated with RoomManager remote system
+
+**Testing:** Scout visits rooms, saves data
 
 ---
 

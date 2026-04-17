@@ -30,32 +30,38 @@ class Harvester {
         const harvesters = room.find(FIND_MY_CREEPS, {
             filter: c => c.memory.role === 'harvester'
         });
-        
-        // Emergency: If less than 2 harvesters, force traditional mode
-        if (harvesters.length < 2) {
+
+        // Check for runners - if no runners, MUST use traditional mode
+        // Otherwise energy sits at sources and spawn can't get it
+        const runners = room.find(FIND_MY_CREEPS, {
+            filter: c => c.memory.role === 'runner'
+        });
+
+        // Emergency: If less than 2 harvesters OR no runners, force traditional mode
+        if (harvesters.length < 2 || runners.length < 1) {
             if (Memory.rooms[room.name].harvesterMode === 'stationary') {
                 // Silently switch back to traditional mode
                 Memory.rooms[room.name].harvesterMode = 'traditional';
             }
             return 'traditional';
         }
-        
+
         // Count total open positions around all sources
         const sources = room.find(FIND_SOURCES);
         let totalPositions = 0;
         for (const source of sources) {
             totalPositions += this.countOpenPositions(source);
         }
-        
-        // Switch to stationary when we have harvesters >= positions AND RCL >= 2 (Phase 4)
-        if (harvesters.length >= totalPositions && room.controller.level >= 2) {
+
+        // Switch to stationary when we have harvesters >= positions AND RCL >= 2 AND we have runners
+        if (harvesters.length >= totalPositions && room.controller.level >= 2 && runners.length >= 1) {
             if (Memory.rooms[room.name].harvesterMode !== 'stationary') {
                 // Silently switch to stationary mode
                 Memory.rooms[room.name].harvesterMode = 'stationary';
             }
             return 'stationary';
         }
-        
+
         // Otherwise stay in/return to traditional mode
         if (Memory.rooms[room.name].harvesterMode === 'stationary') {
             // Silently revert to traditional mode

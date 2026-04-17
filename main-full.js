@@ -4036,7 +4036,11 @@ class SpawnManager {
         
         // Spawn builder first (priority before repairers)
         // Maintain 1:1 ratio with upgraders
-        if (builders.length < desiredBuilders && sites.length > 0) {
+        // Spawn builders if: we have sites to work on, OR we need at least 1 builder for future work
+        const minBuilders = sites.length > 0 ? 1 : 0; // At least 1 builder when there's work
+        const actualDesiredBuilders = Math.max(minBuilders, Math.min(desiredBuilders, sites.length > 0 ? maxBuilders : 1));
+        
+        if (builders.length < actualDesiredBuilders) {
             const bodyCost = this.getBuilderCost(energyCapacity, this.getBodyTier(room, creeps, 'builder'));
             if (energyAvailable >= bodyCost) {
                 this.spawnBuilder(spawn, energyCapacity, room, creeps);
@@ -4055,6 +4059,7 @@ class SpawnManager {
                 const bodyCost = this.getRepairerCost(energyCapacity, this.getBodyTier(room, creeps, 'repairer'));
                 if (energyAvailable >= bodyCost) {
                     this.spawnRepairer(spawn, energyCapacity, room, creeps);
+                    return;
                 }
             }
         }
@@ -4547,12 +4552,16 @@ class SpawnManager {
         // Calculate desired builders (1:1 with upgraders)
         const desiredBuilders = Math.min(upgraders.length, maxBuilders);
         
+        // Allow at least 1 builder even without sites, for future building
+        const minBuilders = sites.length > 0 ? 1 : 0;
+        const actualDesiredBuilders = Math.max(minBuilders, Math.min(desiredBuilders, sites.length > 0 ? maxBuilders : 1));
+        
         // Check if builder needed (builders come before repairers)
-        if (builders.length < desiredBuilders && sites.length > 0) {
+        if (builders.length < actualDesiredBuilders) {
             priorities.push({
                 role: 'builder',
                 emoji: '🔨',
-                reason: builders.length + '/' + desiredBuilders + ' builders (1:1 with upgraders), ' + sites.length + ' sites',
+                reason: builders.length + '/' + actualDesiredBuilders + ' builders, ' + sites.length + ' sites',
                 priority: 1
             });
             if (priorities.length >= 2) return priorities;

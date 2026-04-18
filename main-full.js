@@ -5063,19 +5063,23 @@ class Mokito {
                        metrics.extensions >= 5;
 
             case 4: // Phase 4: Runners + Repairers (Stationary)
+                // Must STILL have 5 extensions built from Phase 3
                 return metrics.harvesters >= requiredHarvesters &&
                        metrics.upgraders >= 3 &&
                        metrics.builders >= 3 &&
+                       metrics.extensions >= 5 &&
                        metrics.runners >= 3 &&
                        metrics.repairers >= 2;
 
             case 5: // Phase 5: Road Network
+                // Must STILL have 5 extensions built
                 if (!this.checkPhaseCriteria(4, metrics)) return false;
-                return metrics.roads >= 10;
+                return metrics.extensions >= 5 && metrics.roads >= 10;
 
             case 6: // Phase 6: Ramparts
+                // Must STILL have 5 extensions built
                 if (!this.checkPhaseCriteria(5, metrics)) return false;
-                return metrics.ramparts >= 3 && metrics.rcl >= 4;
+                return metrics.extensions >= 5 && metrics.ramparts >= 3 && metrics.rcl >= 4;
 
             case 7: // Phase 7+: COMING SOON
             case 8:

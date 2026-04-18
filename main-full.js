@@ -4012,7 +4012,7 @@ class SpawnManager {
         // PHASE 2: Fill all harvester positions
         // Keep spawning harvesters until all source positions are filled
         if (harvesters.length < totalSourcePositions) {
-            if (energyAvailable >= this.getHarvesterCost(energyCapacity, this.getBodyTier(room, creeps, 'harvester'))) {
+            if (energyAvailable >= this.getHarvesterCost(energyCapacity, this.getBodyTier(room, creeps, 'harvester'), creeps)) {
                 // Assign to source with fewest harvesters
                 let bestSource = sources[0];
                 let minHarvesters = Infinity;
@@ -4044,7 +4044,7 @@ class SpawnManager {
         // Ratio: 1 runner per 2 harvesters
         const desiredRunners = Math.ceil(harvesters.length / 2);
         if (runners.length < desiredRunners) {
-            const bodyCost = this.getRunnerCost(energyCapacity, this.getBodyTier(room, creeps, 'runner'));
+            const bodyCost = this.getRunnerCost(energyCapacity, this.getBodyTier(room, creeps, 'runner'), creeps);
             if (energyAvailable >= bodyCost) {
                 this.spawnRunner(spawn, energyCapacity, room, creeps);
             }
@@ -4055,7 +4055,7 @@ class SpawnManager {
         // Calculate desired upgraders: 1 per 1 harvester (1:1 ratio), minimum 1
         const desiredUpgraders = Math.max(1, harvesters.length);
         if (upgraders.length < desiredUpgraders) {
-            const bodyCost = this.getUpgraderCost(energyCapacity, this.getBodyTier(room, creeps, 'upgrader'));
+            const bodyCost = this.getUpgraderCost(energyCapacity, this.getBodyTier(room, creeps, 'upgrader'), creeps);
             if (energyAvailable >= bodyCost) {
                 this.spawnUpgrader(spawn, energyCapacity, room, creeps);
             }
@@ -4081,7 +4081,7 @@ class SpawnManager {
         const actualDesiredBuilders = Math.max(minBuilders, Math.min(desiredBuilders, sites.length > 0 ? maxBuilders : 1));
         
         if (builders.length < actualDesiredBuilders) {
-            const bodyCost = this.getBuilderCost(energyCapacity, this.getBodyTier(room, creeps, 'builder'));
+            const bodyCost = this.getBuilderCost(energyCapacity, this.getBodyTier(room, creeps, 'builder'), creeps);
             if (energyAvailable >= bodyCost) {
                 this.spawnBuilder(spawn, energyCapacity, room, creeps);
                 return;
@@ -4096,7 +4096,7 @@ class SpawnManager {
         if (repairers.length < desiredRepairers && repairers.length < maxRepairers) {
             const needsRepair = this.needsRepair(room);
             if (needsRepair || repairers.length === 0) {
-                const bodyCost = this.getRepairerCost(energyCapacity, this.getBodyTier(room, creeps, 'repairer'));
+                const bodyCost = this.getRepairerCost(energyCapacity, this.getBodyTier(room, creeps, 'repairer'), creeps);
                 if (energyAvailable >= bodyCost) {
                     this.spawnRepairer(spawn, energyCapacity, room, creeps);
                     return;
@@ -4221,19 +4221,47 @@ class SpawnManager {
     }
 
     /**
-     * Get scaled energy budget based on tier
+     * ENERGY BUDGET SYSTEM
+     * 
+     * Reserve 30-40% of energy for emergencies (defense, quick replacements)
+     * Use only 60-70% of available energy for normal spawning
+     * 
+     * Emergency Override: When total creeps < 5, use up to 100%
+     * to get economy started quickly
      */
-    getEnergyBudget(energyCapacity, tier) {
+    getMaxBudget(energyCapacity, creeps) {
+        // Emergency: Very few creeps - use full capacity to bootstrap
+        if (creeps.length < 3) {
+            return energyCapacity;
+        }
+        
+        // Early game: 3-6 creeps - use 80% (some reserve)
+        if (creeps.length < 7) {
+            return Math.floor(energyCapacity * 0.80);
+        }
+        
+        // Normal operation: Use 65% of energy capacity
+        // Reserve 35% for emergencies (defense creeps, sudden losses)
+        return Math.floor(energyCapacity * 0.65);
+    }
+
+    /**
+     * Get scaled energy budget based on tier
+     * Uses the emergency-reserve system
+     */
+    getEnergyBudget(energyCapacity, tier, creeps) {
+        const maxBudget = this.getMaxBudget(energyCapacity, creeps);
+        
         // Tier 1: 200-300 energy (emergency/minimal)
-        // Tier 2: 300-500 energy (early game)
+        // Tier 2: 300-500 energy (early game)  
         // Tier 3: 500-800 energy (mid game)
-        // Tier 4: 800+ energy (late game, use full capacity)
+        // Tier 4: Use max budget (still limited to 65% of capacity)
         
         const budgets = {
-            1: Math.min(300, energyCapacity),
-            2: Math.min(500, energyCapacity),
-            3: Math.min(800, energyCapacity),
-            4: energyCapacity
+            1: Math.min(300, maxBudget),
+            2: Math.min(500, maxBudget),
+            3: Math.min(800, maxBudget),
+            4: maxBudget
         };
         
         return budgets[tier] || 300;
@@ -4243,8 +4271,8 @@ class SpawnManager {
      * Get harvester body and calculate cost
      * Scales based on room progress
      */
-    getHarvesterCost(energyCapacity, tier) {
-        const budget = this.getEnergyBudget(energyCapacity, tier);
+    getHarvesterCost(energyCapacity, tier, creeps) {
+        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
         // WORK = 100, CARRY = 50, MOVE = 50
         // Minimum: WORK + CARRY + MOVE = 200
         // Reserve 100 for CARRY + MOVE, rest for WORK
@@ -4254,7 +4282,7 @@ class SpawnManager {
 
     getHarvesterBody(energyCapacity, room, creeps) {
         const tier = this.getBodyTier(room, creeps, 'harvester');
-        const budget = this.getEnergyBudget(energyCapacity, tier);
+        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
         
         const body = [];
         let remaining = budget - 100; // Reserve for CARRY + MOVE
@@ -4271,8 +4299,8 @@ class SpawnManager {
         return body;
     }
 
-    getRunnerCost(energyCapacity, tier) {
-        const budget = this.getEnergyBudget(energyCapacity, tier);
+    getRunnerCost(energyCapacity, tier, creeps) {
+        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
         // CARRY + MOVE = 100 per set
         const sets = Math.min(Math.floor(budget / 100), 16);
         return Math.max(2, sets) * 100; // At least 2 sets
@@ -4280,7 +4308,7 @@ class SpawnManager {
 
     getRunnerBody(energyCapacity, room, creeps) {
         const tier = this.getBodyTier(room, creeps, 'runner');
-        const budget = this.getEnergyBudget(energyCapacity, tier);
+        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
         
         const body = [];
         let remaining = budget;
@@ -4307,8 +4335,8 @@ class SpawnManager {
         return body.length > 0 ? body : [CARRY, MOVE];
     }
 
-    getUpgraderCost(energyCapacity, tier) {
-        const budget = this.getEnergyBudget(energyCapacity, tier);
+    getUpgraderCost(energyCapacity, tier, creeps) {
+        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
         // WORK + CARRY + MOVE = 200 per set
         const sets = Math.min(Math.floor(budget / 200), 16);
         return Math.max(1, sets) * 200;
@@ -4316,7 +4344,7 @@ class SpawnManager {
 
     getUpgraderBody(energyCapacity, room, creeps) {
         const tier = this.getBodyTier(room, creeps, 'upgrader');
-        const budget = this.getEnergyBudget(energyCapacity, tier);
+        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
         
         const body = [];
         const maxSets = Math.min(Math.floor(budget / 200), 16);
@@ -4330,15 +4358,15 @@ class SpawnManager {
         return body;
     }
 
-    getBuilderCost(energyCapacity, tier) {
-        const budget = this.getEnergyBudget(energyCapacity, tier);
+    getBuilderCost(energyCapacity, tier, creeps) {
+        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
         const sets = Math.min(Math.floor(budget / 200), 16);
         return Math.max(1, sets) * 200;
     }
 
     getBuilderBody(energyCapacity, room, creeps) {
         const tier = this.getBodyTier(room, creeps, 'builder');
-        const budget = this.getEnergyBudget(energyCapacity, tier);
+        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
         
         const body = [];
         const maxSets = Math.min(Math.floor(budget / 200), 16);
@@ -4352,15 +4380,15 @@ class SpawnManager {
         return body;
     }
 
-    getRepairerCost(energyCapacity, tier) {
-        const budget = this.getEnergyBudget(energyCapacity, tier);
+    getRepairerCost(energyCapacity, tier, creeps) {
+        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
         const sets = Math.min(Math.floor(budget / 200), 16);
         return Math.max(1, sets) * 200;
     }
 
     getRepairerBody(energyCapacity, room, creeps) {
         const tier = this.getBodyTier(room, creeps, 'repairer');
-        const budget = this.getEnergyBudget(energyCapacity, tier);
+        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
         
         const body = [];
         const maxSets = Math.min(Math.floor(budget / 200), 16);

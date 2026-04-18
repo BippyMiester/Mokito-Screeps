@@ -5841,7 +5841,9 @@ class Mokito {
                        metrics.upgraders >= 1;
                 
             case 3: // Capacity
-                return metrics.harvesters >= metrics.totalSourcePositions &&
+                // Need open spaces / 2 harvesters (rounded down)
+                const minHarvestersForPhase3 = Math.floor(metrics.totalSourcePositions / 2);
+                return metrics.harvesters >= minHarvestersForPhase3 &&
                        metrics.builders >= 1 &&
                        metrics.extensions >= 5 &&
                        metrics.rcl >= 2;
@@ -6002,7 +6004,8 @@ class Mokito {
                 requirements.push('1+ upgrader');
                 break;
             case 2:
-                requirements.push(`${metrics.totalSourcePositions}+ harvesters`);
+                const minHarvestersForPhase3Req = Math.floor(metrics.totalSourcePositions / 2);
+                requirements.push(`${minHarvestersForPhase3Req}+ harvesters (open spaces / 2)`);
                 requirements.push('1+ builder');
                 requirements.push('5+ extensions');
                 break;

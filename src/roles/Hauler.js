@@ -51,10 +51,15 @@ class Hauler {
                 creep.memory.remoteRoom = roomName;
                 // Assign to first source that needs a hauler
                 for (const sourceId in sources) {
-                    if (sources[sourceId].harvester && !sources[sourceId].hauler) {
+                    const sourceData = sources[sourceId];
+                    // Ensure sourceData is an object
+                    if (typeof sourceData !== 'object' || sourceData === null) {
+                        continue;
+                    }
+                    if (sourceData.harvester && !sourceData.hauler) {
                         creep.memory.sourceId = sourceId;
-                        creep.memory.containerId = sources[sourceId].containerId;
-                        sources[sourceId].hauler = creep.name;
+                        creep.memory.containerId = sourceData.containerId;
+                        sourceData.hauler = creep.name;
                         return;
                     }
                 }
@@ -97,8 +102,21 @@ class Hauler {
     withdrawFromContainer(creep, container) {
         // Check if container has energy
         if (container.store[RESOURCE_ENERGY] <= 0) {
-            // Wait for energy
-            creep.say('⏳ wait');
+            // Container empty - go back to home room
+            if (creep.room.name !== creep.memory.homeRoom) {
+                this.travelToHomeRoom(creep);
+                creep.say('🏠 home');
+            } else {
+                // Already home - look for other sources
+                creep.say('❌ empty');
+                const storage = creep.room.find(FIND_STRUCTURES, {
+                    filter: s => s.structureType === STRUCTURE_STORAGE && s.store[RESOURCE_ENERGY] > 0
+                })[0];
+                if (storage) {
+                    creep.moveTo(storage);
+                    creep.say('📦 storage');
+                }
+            }
             return;
         }
         

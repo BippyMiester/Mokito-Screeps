@@ -2,7 +2,7 @@
 
 ## AI CONTEXT
 
-Read this file and commit this file to your context for this session. Follow all instructions located within this file while working on the project. After you have read these files and you're ready to start development, let the user know. Refer back to this file for every new task to ensure that you are following the correct procedures for every single task. Do this first before start working on the task.
+Read this file and commit this file to your context for this session. Follow all instructions located within this file while working on the project. After you have read these files and you're ready to start development, let the user know. Read this file prior to every new task assigned to you, This will ensure that you are following the correct procedures for every single task. Do this first before start working on the task.
 
 ## Project Overview
 This is an AI bot for the game [Screeps](https://screeps.com/), a persistent MMO RTS where players control units through JavaScript code.
@@ -41,6 +41,9 @@ Use this documentation to help build the bot and ensure that there are no errors
 The bot is built in a modular fashion with code in `src/` being compiled/bundled into `main.js` for deployment to Screeps.
 
 ## Development Notes
+
+**CRITICAL:** For every task the user sends you, ensure that you are doing the following during development.
+
 - Uses a build process (`build.js`) to bundle the source code
 - The `main.js` file is a minified file
 - The `main-full.js` file is a human readable regular file with code comments

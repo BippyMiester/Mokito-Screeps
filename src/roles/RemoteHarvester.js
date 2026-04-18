@@ -46,19 +46,38 @@ class RemoteHarvester {
         
         // Find an unassigned source
         for (const roomName in remoteAssignments) {
-            const sources = remoteAssignments[roomName];
-            for (const sourceId in sources) {
-                if (!sources[sourceId].harvester) {
+            const assignment = remoteAssignments[roomName];
+            if (!assignment || !assignment.sources) continue;
+            
+            for (const sourceId in assignment.sources) {
+                const sourceData = assignment.sources[sourceId];
+                // Ensure sourceData is an object, not a boolean or primitive
+                if (typeof sourceData !== 'object' || sourceData === null) {
+                    // Fix corrupted data structure
+                    assignment.sources[sourceId] = {
+                        harvester: null,
+                        hauler: null,
+                        containerBuilt: false,
+                        containerId: null
+                    };
+                    continue;
+                }
+                
+                if (!sourceData.harvester) {
                     creep.memory.remoteRoom = roomName;
                     creep.memory.sourceId = sourceId;
-                    sources[sourceId].harvester = creep.name;
+                    sourceData.harvester = creep.name;
                     return;
                 }
             }
         }
         
-        // No assignment found
-        creep.say('❌ no assign');
+        // No assignment found - go to any remote room
+        for (const roomName in remoteAssignments) {
+            creep.memory.remoteRoom = roomName;
+            creep.say('🌍 ' + roomName);
+            return;
+        }
     }
     
     travelToRemoteRoom(creep) {

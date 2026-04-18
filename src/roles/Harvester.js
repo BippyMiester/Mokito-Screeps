@@ -429,7 +429,9 @@ class Harvester {
             // Shouldn't happen if we're at our position, but handle it
             creep.moveTo(source);
         } else if (result === ERR_NOT_ENOUGH_RESOURCES) {
-            creep.say('⏳ wait');
+            // Source regenerating - move to position anyway
+            creep.moveTo(source);
+            creep.say('⏳ regen');
         }
     }
     

@@ -175,29 +175,15 @@ class Runner {
             return;
         }
         
-        // No energy to collect and no energy stored - wait near sources
-        const sources = creep.room.find(FIND_SOURCES);
-        if (sources.length > 0) {
-            // Find source with most dropped energy nearby
-            let bestSource = sources[0];
-            let maxDropped = 0;
-            
-            for (const source of sources) {
-                const dropped = source.pos.findInRange(FIND_DROPPED_RESOURCES, 3, {
-                    filter: r => r.resourceType === RESOURCE_ENERGY
-                });
-                const totalDropped = dropped.reduce((sum, r) => sum + r.amount, 0);
-                if (totalDropped > maxDropped) {
-                    maxDropped = totalDropped;
-                    bestSource = source;
-                }
-            }
-            
-            creep.moveTo(bestSource, {
+        // No energy to collect and no energy stored - return to spawn area
+        // Don't wait idle in the middle of nowhere
+        const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
+        if (spawn) {
+            creep.moveTo(spawn, {
                 range: 3,
                 visualizePathStyle: { stroke: '#ffaa00' }
             });
-            creep.say('⏳ waiting');
+            creep.say('🏠 return');
         }
     }
 

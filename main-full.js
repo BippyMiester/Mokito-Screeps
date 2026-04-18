@@ -430,7 +430,9 @@ class Harvester {
             // Shouldn't happen if we're at our position, but handle it
             creep.moveTo(source);
         } else if (result === ERR_NOT_ENOUGH_RESOURCES) {
-            creep.say('⏳ wait');
+            // Source regenerating - move to position anyway
+            creep.moveTo(source);
+            creep.say('⏳ regen');
         }
     }
     
@@ -636,29 +638,15 @@ class Runner {
             return;
         }
         
-        // No energy to collect and no energy stored - wait near sources
-        const sources = creep.room.find(FIND_SOURCES);
-        if (sources.length > 0) {
-            // Find source with most dropped energy nearby
-            let bestSource = sources[0];
-            let maxDropped = 0;
-            
-            for (const source of sources) {
-                const dropped = source.pos.findInRange(FIND_DROPPED_RESOURCES, 3, {
-                    filter: r => r.resourceType === RESOURCE_ENERGY
-                });
-                const totalDropped = dropped.reduce((sum, r) => sum + r.amount, 0);
-                if (totalDropped > maxDropped) {
-                    maxDropped = totalDropped;
-                    bestSource = source;
-                }
-            }
-            
-            creep.moveTo(bestSource, {
+        // No energy to collect and no energy stored - return to spawn area
+        // Don't wait idle in the middle of nowhere
+        const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
+        if (spawn) {
+            creep.moveTo(spawn, {
                 range: 3,
                 visualizePathStyle: { stroke: '#ffaa00' }
             });
-            creep.say('⏳ waiting');
+            creep.say('🏠 return');
         }
     }
 
@@ -1497,19 +1485,38 @@ class RemoteHarvester {
         
         // Find an unassigned source
         for (const roomName in remoteAssignments) {
-            const sources = remoteAssignments[roomName];
-            for (const sourceId in sources) {
-                if (!sources[sourceId].harvester) {
+            const assignment = remoteAssignments[roomName];
+            if (!assignment || !assignment.sources) continue;
+            
+            for (const sourceId in assignment.sources) {
+                const sourceData = assignment.sources[sourceId];
+                // Ensure sourceData is an object, not a boolean or primitive
+                if (typeof sourceData !== 'object' || sourceData === null) {
+                    // Fix corrupted data structure
+                    assignment.sources[sourceId] = {
+                        harvester: null,
+                        hauler: null,
+                        containerBuilt: false,
+                        containerId: null
+                    };
+                    continue;
+                }
+                
+                if (!sourceData.harvester) {
                     creep.memory.remoteRoom = roomName;
                     creep.memory.sourceId = sourceId;
-                    sources[sourceId].harvester = creep.name;
+                    sourceData.harvester = creep.name;
                     return;
                 }
             }
         }
         
-        // No assignment found
-        creep.say('❌ no assign');
+        // No assignment found - go to any remote room
+        for (const roomName in remoteAssignments) {
+            creep.memory.remoteRoom = roomName;
+            creep.say('🌍 ' + roomName);
+            return;
+        }
     }
     
     travelToRemoteRoom(creep) {
@@ -1724,10 +1731,15 @@ class Hauler {
                 creep.memory.remoteRoom = roomName;
                 // Assign to first source that needs a hauler
                 for (const sourceId in sources) {
-                    if (sources[sourceId].harvester && !sources[sourceId].hauler) {
+                    const sourceData = sources[sourceId];
+                    // Ensure sourceData is an object
+                    if (typeof sourceData !== 'object' || sourceData === null) {
+                        continue;
+                    }
+                    if (sourceData.harvester && !sourceData.hauler) {
                         creep.memory.sourceId = sourceId;
-                        creep.memory.containerId = sources[sourceId].containerId;
-                        sources[sourceId].hauler = creep.name;
+                        creep.memory.containerId = sourceData.containerId;
+                        sourceData.hauler = creep.name;
                         return;
                     }
                 }
@@ -1770,8 +1782,21 @@ class Hauler {
     withdrawFromContainer(creep, container) {
         // Check if container has energy
         if (container.store[RESOURCE_ENERGY] <= 0) {
-            // Wait for energy
-            creep.say('⏳ wait');
+            // Container empty - go back to home room
+            if (creep.room.name !== creep.memory.homeRoom) {
+                this.travelToHomeRoom(creep);
+                creep.say('🏠 home');
+            } else {
+                // Already home - look for other sources
+                creep.say('❌ empty');
+                const storage = creep.room.find(FIND_STRUCTURES, {
+                    filter: s => s.structureType === STRUCTURE_STORAGE && s.store[RESOURCE_ENERGY] > 0
+                })[0];
+                if (storage) {
+                    creep.moveTo(storage);
+                    creep.say('📦 storage');
+                }
+            }
             return;
         }
         

@@ -149,74 +149,127 @@ class Repairer {
     }
 
     repair(creep) {
-        // Priority 1: Build construction sites
+        // Priority 1: Critical repairs (below 80% health)
+        const criticalStructure = this.findCriticalRepair(creep);
+        if (criticalStructure) {
+            if (creep.repair(criticalStructure) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(criticalStructure);
+            }
+            creep.say('🔧 repair');
+            return;
+        }
+
+        // Priority 2: Balanced wall/rampart upgrading (100k increments)
+        const wallToUpgrade = this.findWallForBalancedUpgrade(creep);
+        if (wallToUpgrade) {
+            if (creep.repair(wallToUpgrade) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(wallToUpgrade);
+            }
+            creep.say('🧱 ' + Math.ceil(wallToUpgrade.hits / 100000) + '00k');
+            return;
+        }
+
+        // Priority 3: Build construction sites
         const constructionSite = creep.pos.findClosestByPath(FIND_CONSTRUCTION_SITES);
         if (constructionSite) {
             if (creep.build(constructionSite) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(constructionSite, { visualizePathStyle: { stroke: '#ffaa00' } });
             }
-            creep.say('🔨 help');
+            creep.say('🔨 build');
             return;
         }
 
-        // Priority 2: Ramparts (highest priority for defense)
+        // Nothing to do - upgrade controller
+        this.upgradeController(creep);
+    }
+
+    /**
+     * Find structures needing critical repair (below 80% health)
+     * Priority: Ramparts > Containers > Roads
+     */
+    findCriticalRepair(creep) {
+        // Check ramparts first (80% threshold)
         const rampart = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_RAMPART &&
-                        s.hits < s.hitsMax * 0.8 // Repair when below 80%
+                        s.hits < s.hitsMax * 0.8
         });
+        if (rampart) return rampart;
 
-        if (rampart) {
-            if (creep.repair(rampart) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(rampart);
-            }
-            creep.say('🛡️ rampart');
-            return;
-        }
-
-        // Priority 3: Containers (critical for energy flow)
+        // Check containers (80% threshold)
         const container = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_CONTAINER &&
                         s.hits < s.hitsMax * 0.8
         });
+        if (container) return container;
 
-        if (container) {
-            if (creep.repair(container) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(container);
-            }
-            creep.say('🔧 repair');
-            return;
-        }
-
-        // Priority 4: Roads
+        // Check roads (50% threshold)
         const road = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_ROAD &&
                         s.hits < s.hitsMax * 0.5
         });
+        if (road) return road;
 
-        if (road) {
-            if (creep.repair(road) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(road);
-            }
-            creep.say('🔧 repair');
-            return;
-        }
+        return null;
+    }
 
-        // Priority 5: Walls (lowest priority)
-        const wall = creep.pos.findClosestByPath(FIND_STRUCTURES, {
-            filter: s => s.structureType === STRUCTURE_WALL &&
-                        s.hits < s.hitsMax * 0.5
+    /**
+     * Find walls/ramparts for balanced upgrade in 100k increments
+     * Ensures all walls reach each tier before moving to next
+     */
+    findWallForBalancedUpgrade(creep) {
+        // Get all walls and ramparts
+        const defenseStructures = creep.room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_WALL || 
+                        s.structureType === STRUCTURE_RAMPART
         });
 
-        if (wall) {
-            if (creep.repair(wall) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(wall);
+        if (defenseStructures.length === 0) return null;
+
+        // Define upgrade tiers (100k, 200k, 300k, etc. up to 300M)
+        const tiers = [100000, 200000, 300000, 400000, 500000, 
+                      600000, 700000, 800000, 900000, 1000000,
+                      2000000, 3000000, 4000000, 5000000, 
+                      10000000, 20000000, 300000000];
+
+        // Find current tier (lowest tier not yet reached by all structures)
+        let currentTarget = null;
+        for (const tier of tiers) {
+            // Check if any structure is below this tier
+            const structuresBelowTier = defenseStructures.filter(s => s.hits < tier);
+            if (structuresBelowTier.length > 0) {
+                // This is our current target tier
+                currentTarget = tier;
+                break;
             }
-            creep.say('🔧 wall');
-            return;
         }
 
-        // Nothing to repair - upgrade controller as idle behavior
-        this.upgradeController(creep);
+        if (!currentTarget) return null; // All structures at max tier
+
+        // Find structure closest to current target tier that needs repair
+        // Prioritize those below the current target tier
+        let targetStructure = null;
+        let lowestHits = Infinity;
+
+        for (const structure of defenseStructures) {
+            if (structure.hits < currentTarget && structure.hits < lowestHits) {
+                // Check range
+                const range = creep.pos.getRangeTo(structure);
+                if (range <= 15) { // Within reasonable range
+                    lowestHits = structure.hits;
+                    targetStructure = structure;
+                }
+            }
+        }
+
+        // If we found a structure below target tier, return it
+        if (targetStructure) return targetStructure;
+
+        // Otherwise, find closest structure that could use repair
+        return creep.pos.findClosestByPath(FIND_STRUCTURES, {
+            filter: s => (s.structureType === STRUCTURE_WALL || 
+                         s.structureType === STRUCTURE_RAMPART) &&
+                         s.hits < s.hitsMax
+        });
     }
 
     upgradeController(creep) {

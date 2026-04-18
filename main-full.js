@@ -3921,15 +3921,32 @@ class SpawnManager {
         // Store energy status for other logic
         room.memory.energyFull = energyFull;
         
+        // DETERMINE CURRENT PHASE for spawning logic
+        // Phase 1: <2 harvesters OR (2 harvesters but <1 runner)
+        // Phase 2: 2+ harvesters, 1+ runner, but <1 upgrader
+        // Phase 3+: Normal operation
+        const inStationaryMode = room.memory.harvesterMode === 'stationary' || room.memory.stationaryMode;
+        const isPhase1 = harvesters.length < 2 || (harvesters.length >= 2 && runners.length < 1 && !inStationaryMode);
+        const isPhase2 = harvesters.length >= 2 && runners.length >= 1 && upgraders.length < 1 && !inStationaryMode;
+        
         // EMERGENCY MODE: Less than 2 harvesters
         // This is critical - we need energy production immediately
         if (harvesters.length < 2) {
             // Force traditional mode for all harvesters
             room.memory.stationaryMode = false;
+            room.memory.harvesterMode = 'traditional';
             
-            if (energyAvailable >= 200) {
-                // Spawn basic harvester that will deliver to spawn
-                const body = [WORK, CARRY, MOVE]; // Minimum viable body
+            // In Phase 1, use basic body but spawn ASAP
+            // Body: MOVE, WORK, CARRY = 200 energy
+            // Or with extra CARRY: MOVE, WORK, CARRY, CARRY = 250 energy (if available)
+            let body;
+            if (energyAvailable >= 250) {
+                body = [WORK, CARRY, CARRY, MOVE]; // 250 energy - better early game
+            } else if (energyAvailable >= 200) {
+                body = [WORK, CARRY, MOVE]; // 200 energy - minimum
+            }
+            
+            if (body) {
                 const name = 'Harvester' + Game.time;
                 const source = sources[0];
                 if (source) {
@@ -3940,29 +3957,52 @@ class SpawnManager {
                             delivering: false
                         }
                     });
-                    // Emergency harvester spawned silently
                 }
             }
+            room.memory.waitingForEnergy = !body;
+            return;
+        }
+
+        // PHASE 1 CONTINUED: We have 2+ harvesters, now need runner
+        // Phase 1 priority: Runner before upgrader!
+        if (isPhase1 && runners.length < 1) {
+            // Spawn runner with minimal body
+            // Body: 2x CARRY + 2x MOVE = 200 energy (minimum)
+            // Or: 4x CARRY + 2x MOVE = 300 energy (if available)
+            let body;
+            if (energyAvailable >= 300) {
+                body = [CARRY, CARRY, CARRY, CARRY, MOVE, MOVE]; // 4 carry, 2 move
+            } else if (energyAvailable >= 200) {
+                body = [CARRY, CARRY, MOVE, MOVE]; // 2 carry, 2 move
+            }
+            
+            if (body) {
+                const name = 'Runner' + Game.time;
+                spawn.spawnCreep(body, name, {
+                    memory: { role: 'runner' }
+                });
+            }
+            room.memory.waitingForEnergy = !body;
             return;
         }
 
         // Check if we should wait for full energy to maximize body parts
-        // BUT: Never wait if we have no runners in stationary mode - that's a deadlock
-        const inStationaryMode = room.memory.harvesterMode === 'stationary' || room.memory.stationaryMode;
+        // BUT: Never wait in Phase 1-2, or if critical need
         const criticalNeedRunner = inStationaryMode && runners.length < 1 && harvesters.length >= 2;
+        const earlyPhase = isPhase1 || isPhase2;
         
-        if (!energyFull && harvesters.length >= 2 && room.controller.level >= 2 && !criticalNeedRunner) {
+        if (!energyFull && harvesters.length >= 2 && room.controller.level >= 2 && !criticalNeedRunner && !earlyPhase) {
             // Wait for full energy unless it's early game or critical need
-            // Status will be shown in heartbeat
             room.memory.waitingForEnergy = true;
             return;
         }
         
         room.memory.waitingForEnergy = false;
 
-        // PHASE 1: Initial startup - exactly 2 harvesters, then 1 upgrader
-        if (harvesters.length === 2 && upgraders.length < 1) {
-            // For early game, don't wait for full energy
+        // PHASE 2: Initial startup - have 2 harvesters and 1 runner, now need upgrader
+        if (isPhase2) {
+            // Spawn upgrader with minimal body
+            // Body: WORK, CARRY, MOVE = 200 energy
             if (energyAvailable >= 200) {
                 this.spawnUpgrader(spawn, energyCapacity, room, creeps);
             }
@@ -4457,7 +4497,10 @@ class SpawnManager {
             }
         }
 
-        // PHASE 1: Initial startup - need 2 harvesters then 1 upgrader
+        // PHASE 1: Initial startup - need 2 harvesters then 1 RUNNER (not upgrader yet!)
+        // Runner is needed before upgrader to ensure energy transport
+        const inStationaryMode = room.memory.harvesterMode === 'stationary' || room.memory.stationaryMode;
+        
         if (harvesters.length < 2) {
             priorities.push({
                 role: 'harvester',
@@ -4466,11 +4509,21 @@ class SpawnManager {
                 priority: 1
             });
             if (priorities.length >= 2) return priorities;
-        } else if (harvesters.length === 2 && upgraders.length < 1) {
+        } else if (harvesters.length >= 2 && runners.length < 1 && !inStationaryMode) {
+            // PHASE 1 CONTINUED: Have 2 harvesters, now need runner
+            priorities.push({
+                role: 'runner',
+                emoji: '🏃',
+                reason: 'Phase 1: First runner needed for energy transport',
+                priority: 1
+            });
+            if (priorities.length >= 2) return priorities;
+        } else if (harvesters.length >= 2 && runners.length >= 1 && upgraders.length < 1 && !inStationaryMode) {
+            // PHASE 2: Have harvesters and runner, now need upgrader
             priorities.push({
                 role: 'upgrader',
                 emoji: '⚡',
-                reason: 'First upgrader needed',
+                reason: 'Phase 2: First upgrader for controller progress',
                 priority: 1
             });
             if (priorities.length >= 2) return priorities;

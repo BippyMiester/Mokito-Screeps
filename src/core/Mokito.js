@@ -189,15 +189,15 @@ class Mokito {
                        metrics.extensions >= 5 &&
                        metrics.rcl >= 2;
                 
-            case 4: // Efficiency (Stationary)
-                const desiredRunners = Math.ceil(metrics.harvesters / 2);
-                return metrics.harvesters >= metrics.totalSourcePositions &&
-                       metrics.runners >= desiredRunners &&
+            case 4: // Efficiency (Stationary) - Need open spaces / 2 harvesters
+                const desiredRunners4 = Math.ceil(metrics.harvesters / 2);
+                return metrics.harvesters >= Math.floor(metrics.totalSourcePositions / 2) &&
+                       metrics.runners >= desiredRunners4 &&
                        metrics.upgraders >= 1 &&
                        metrics.inStationaryMode &&
                        metrics.rcl >= 2;
                 
-            case 5: // Storage - Resource Buffer
+            case 5: // Storage - Resource Buffer (moved from phase 9)
                 if (!this.checkPhaseCriteria(4, metrics)) {
                     return false;
                 }
@@ -208,8 +208,8 @@ class Mokito {
                 if (!this.checkPhaseCriteria(5, metrics)) {
                     return false;
                 }
-                const sources = metrics.totalSourcePositions / 8; // Approximate
-                return metrics.containers >= Math.floor(sources);
+                const numSources = Math.floor(metrics.totalSourcePositions / 8); // Approximate
+                return metrics.containers >= Math.floor(numSources);
                 
             case 7: // Infrastructure - Roads
                 if (!this.checkPhaseCriteria(6, metrics)) {

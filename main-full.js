@@ -700,6 +700,17 @@ class Runner {
             }
         }
         
+        // Priority 4: Storage - if spawn, towers, and extensions are all full
+        if (targets.length === 1) { // Only spawn in targets, everything else full
+            const storage = creep.room.find(FIND_STRUCTURES, {
+                filter: (s) => s.structureType === STRUCTURE_STORAGE &&
+                            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+            })[0];
+            if (storage) {
+                targets.push({ type: 'storage', obj: storage });
+            }
+        }
+        
         // Try to deliver to each target in order
         for (const target of targets) {
             const result = creep.transfer(target.obj, RESOURCE_ENERGY);
@@ -4152,9 +4163,10 @@ class SpawnManager {
             return;
         }
 
-        // PHASE 2+: Fill all harvester positions
-        // Keep spawning harvesters until all source positions are filled
-        if (harvesters.length < totalSourcePositions) {
+        // PHASE 2+: Fill harvester positions - only need open spaces / 2
+        // Balanced: Fewer harvesters, each takes more spots around source
+        const maxHarvesters = Math.floor(totalSourcePositions / 2);
+        if (harvesters.length < maxHarvesters && harvesters.length < sources.length * 2) {
             const tier = this.getBodyTier(room, creeps, 'harvester');
             const cost = this.getHarvesterCost(energyCapacity, tier, creeps);
             
@@ -5182,7 +5194,8 @@ class RoomManager {
                 damagedStructures.sort((a, b) => (a.hits / a.hitsMax) - (b.hits / b.hitsMax));
                 
                 for (const tower of towers) {
-                    if (tower.store.getUsedCapacity(RESOURCE_ENERGY) > tower.store.getCapacity(RESOURCE_ENERGY) * 0.5) {
+                    // Towers repair as long as they have ANY energy
+                    if (tower.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
                         tower.repair(damagedStructures[0]);
                     }
                 }
@@ -5193,10 +5206,11 @@ class RoomManager {
                 filter: s => (s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART) && s.hits < 100000
             });
             
-            if (defenseStructures.length > 0 && towers[0].store.getUsedCapacity(RESOURCE_ENERGY) > towers[0].store.getCapacity(RESOURCE_ENERGY) * 0.8) {
+            if (defenseStructures.length > 0) {
                 defenseStructures.sort((a, b) => a.hits - b.hits);
                 for (const tower of towers) {
-                    if (tower.store.getUsedCapacity(RESOURCE_ENERGY) > tower.store.getCapacity(RESOURCE_ENERGY) * 0.8) {
+                    // Repair as long as tower has energy (removed 80% threshold)
+                    if (tower.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
                         tower.repair(defenseStructures[0]);
                     }
                 }
@@ -5802,15 +5816,15 @@ class Mokito {
                        metrics.extensions >= 5 &&
                        metrics.rcl >= 2;
                 
-            case 4: // Efficiency (Stationary)
-                const desiredRunners = Math.ceil(metrics.harvesters / 2);
-                return metrics.harvesters >= metrics.totalSourcePositions &&
-                       metrics.runners >= desiredRunners &&
+            case 4: // Efficiency (Stationary) - Need open spaces / 2 harvesters
+                const desiredRunners4 = Math.ceil(metrics.harvesters / 2);
+                return metrics.harvesters >= Math.floor(metrics.totalSourcePositions / 2) &&
+                       metrics.runners >= desiredRunners4 &&
                        metrics.upgraders >= 1 &&
                        metrics.inStationaryMode &&
                        metrics.rcl >= 2;
                 
-            case 5: // Storage - Resource Buffer
+            case 5: // Storage - Resource Buffer (moved from phase 9)
                 if (!this.checkPhaseCriteria(4, metrics)) {
                     return false;
                 }
@@ -5821,8 +5835,8 @@ class Mokito {
                 if (!this.checkPhaseCriteria(5, metrics)) {
                     return false;
                 }
-                const sources = metrics.totalSourcePositions / 8; // Approximate
-                return metrics.containers >= Math.floor(sources);
+                const numSources = Math.floor(metrics.totalSourcePositions / 8); // Approximate
+                return metrics.containers >= Math.floor(numSources);
                 
             case 7: // Infrastructure - Roads
                 if (!this.checkPhaseCriteria(6, metrics)) {

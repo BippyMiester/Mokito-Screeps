@@ -237,6 +237,17 @@ class Runner {
             }
         }
         
+        // Priority 4: Storage - if spawn, towers, and extensions are all full
+        if (targets.length === 1) { // Only spawn in targets, everything else full
+            const storage = creep.room.find(FIND_STRUCTURES, {
+                filter: (s) => s.structureType === STRUCTURE_STORAGE &&
+                            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+            })[0];
+            if (storage) {
+                targets.push({ type: 'storage', obj: storage });
+            }
+        }
+        
         // Try to deliver to each target in order
         for (const target of targets) {
             const result = creep.transfer(target.obj, RESOURCE_ENERGY);

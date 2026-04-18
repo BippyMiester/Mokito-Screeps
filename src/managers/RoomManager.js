@@ -159,7 +159,8 @@ class RoomManager {
                 damagedStructures.sort((a, b) => (a.hits / a.hitsMax) - (b.hits / b.hitsMax));
                 
                 for (const tower of towers) {
-                    if (tower.store.getUsedCapacity(RESOURCE_ENERGY) > tower.store.getCapacity(RESOURCE_ENERGY) * 0.5) {
+                    // Towers repair as long as they have ANY energy
+                    if (tower.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
                         tower.repair(damagedStructures[0]);
                     }
                 }
@@ -170,10 +171,11 @@ class RoomManager {
                 filter: s => (s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART) && s.hits < 100000
             });
             
-            if (defenseStructures.length > 0 && towers[0].store.getUsedCapacity(RESOURCE_ENERGY) > towers[0].store.getCapacity(RESOURCE_ENERGY) * 0.8) {
+            if (defenseStructures.length > 0) {
                 defenseStructures.sort((a, b) => a.hits - b.hits);
                 for (const tower of towers) {
-                    if (tower.store.getUsedCapacity(RESOURCE_ENERGY) > tower.store.getCapacity(RESOURCE_ENERGY) * 0.8) {
+                    // Repair as long as tower has energy (removed 80% threshold)
+                    if (tower.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
                         tower.repair(defenseStructures[0]);
                     }
                 }

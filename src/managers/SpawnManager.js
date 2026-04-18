@@ -163,9 +163,10 @@ class SpawnManager {
             return;
         }
 
-        // PHASE 2+: Fill all harvester positions
-        // Keep spawning harvesters until all source positions are filled
-        if (harvesters.length < totalSourcePositions) {
+        // PHASE 2+: Fill harvester positions - only need open spaces / 2
+        // Balanced: Fewer harvesters, each takes more spots around source
+        const maxHarvesters = Math.floor(totalSourcePositions / 2);
+        if (harvesters.length < maxHarvesters && harvesters.length < sources.length * 2) {
             const tier = this.getBodyTier(room, creeps, 'harvester');
             const cost = this.getHarvesterCost(energyCapacity, tier, creeps);
             

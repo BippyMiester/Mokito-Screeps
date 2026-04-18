@@ -664,37 +664,51 @@ class Runner {
 
     deliverEnergy(creep) {
         // Get all possible delivery targets and sort by priority
+        // Priority: Spawn -> Towers (to 50%) -> Extensions
         const targets = [];
         
-        // Priority 1: Spawn
+        // Priority 1: Spawn (always fill first for spawning)
         const spawn = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
             filter: (s) => s.structureType === STRUCTURE_SPAWN &&
                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
         });
         if (spawn) targets.push({ type: 'spawn', obj: spawn });
         
-        // Priority 2: Extensions
-        const extensions = creep.room.find(FIND_MY_STRUCTURES, {
-            filter: (s) => s.structureType === STRUCTURE_EXTENSION &&
-                        s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-        });
-        if (extensions.length > 0) {
-            // Find closest extension
-            const closestExtension = creep.pos.findClosestByPath(extensions);
-            if (closestExtension) {
-                targets.push({ type: 'extension', obj: closestExtension });
-            }
-        }
-        
-        // Priority 3: Towers
+        // Priority 2: Towers - fill to at least 50% before filling extensions
+        // This ensures we have energy for defense
         const towers = creep.room.find(FIND_MY_STRUCTURES, {
             filter: (s) => s.structureType === STRUCTURE_TOWER &&
-                        s.store.getFreeCapacity(RESOURCE_ENERGY) > 100
+                        s.store.getUsedCapacity(RESOURCE_ENERGY) < s.store.getCapacity(RESOURCE_ENERGY) * 0.5
         });
         if (towers.length > 0) {
-            const closestTower = creep.pos.findClosestByPath(towers);
-            if (closestTower) {
-                targets.push({ type: 'tower', obj: closestTower });
+            // Sort by lowest energy percentage (fill emptiest first)
+            towers.sort((a, b) => {
+                const pctA = a.store.getUsedCapacity(RESOURCE_ENERGY) / a.store.getCapacity(RESOURCE_ENERGY);
+                const pctB = b.store.getUsedCapacity(RESOURCE_ENERGY) / b.store.getCapacity(RESOURCE_ENERGY);
+                return pctA - pctB;
+            });
+            const neediestTower = towers[0];
+            targets.push({ type: 'tower', obj: neediestTower });
+        }
+        
+        // Priority 3: Extensions (only fill if towers are above 50%)
+        const towersLow = creep.room.find(FIND_MY_STRUCTURES, {
+            filter: (s) => s.structureType === STRUCTURE_TOWER &&
+                        s.store.getUsedCapacity(RESOURCE_ENERGY) < s.store.getCapacity(RESOURCE_ENERGY) * 0.5
+        });
+        
+        if (towersLow.length === 0) {
+            // All towers are above 50%, can fill extensions now
+            const extensions = creep.room.find(FIND_MY_STRUCTURES, {
+                filter: (s) => s.structureType === STRUCTURE_EXTENSION &&
+                            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+            });
+            if (extensions.length > 0) {
+                // Find closest extension
+                const closestExtension = creep.pos.findClosestByPath(extensions);
+                if (closestExtension) {
+                    targets.push({ type: 'extension', obj: closestExtension });
+                }
             }
         }
         
@@ -3663,58 +3677,139 @@ class ConstructionManager {
     }
     
     buildRamparts(room) {
-        // Build ramparts around important structures (spawn, controller, towers)
-        const spawn = room.find(FIND_MY_SPAWNS)[0];
-        if (!spawn) return;
+        // Phase 6: Build ramparts at room entrances to defend against invaders
+        // Strategy: Build ramparts 2 tiles from exits in a line until hitting walls
+        // This forces enemies to walk through a chokepoint protected by ramparts
         
-        // Get positions to protect
-        const protectPositions = [spawn.pos];
+        const exitDirections = [FIND_EXIT_TOP, FIND_EXIT_RIGHT, FIND_EXIT_BOTTOM, FIND_EXIT_LEFT];
         
-        // Add controller position
-        if (room.controller) {
-            protectPositions.push(room.controller.pos);
-        }
-        
-        // Add tower positions
-        const towers = room.find(FIND_MY_STRUCTURES, {
-            filter: { structureType: STRUCTURE_TOWER }
-        });
-        towers.forEach(tower => protectPositions.push(tower.pos));
-        
-        // Build ramparts around each protected position
-        for (const pos of protectPositions) {
-            // Build a 3x3 area of ramparts around important structures
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    // Skip the center position (structure is there)
-                    if (dx === 0 && dy === 0) continue;
-                    
-                    const x = pos.x + dx;
-                    const y = pos.y + dy;
-                    
-                    if (x >= 1 && x <= 48 && y >= 1 && y <= 48) {
-                        const rampartPos = new RoomPosition(x, y, room.name);
-                        const terrain = rampartPos.lookFor(LOOK_TERRAIN);
-                        
-                        if (terrain[0] !== 'wall') {
-                            const structures = rampartPos.lookFor(LOOK_STRUCTURES);
-                            const hasRampart = structures.some(s => 
-                                s.structureType === STRUCTURE_RAMPART
-                            );
-                            const sites = rampartPos.lookFor(LOOK_CONSTRUCTION_SITES);
-                            const hasConstruction = sites.some(s => 
-                                s.structureType === STRUCTURE_RAMPART
-                            );
-                            
-                            if (!hasRampart && !hasConstruction) {
-                                rampartPos.createConstructionSite(STRUCTURE_RAMPART);
-                                return;
-                            }
-                        }
-                    }
+        for (const exitDir of exitDirections) {
+            const exitPositions = room.find(exitDir);
+            if (exitPositions.length === 0) continue;
+            
+            // Find positions 2 tiles from the exit
+            const defensivePositions = this.getDefensiveLine(room, exitDir, exitPositions);
+            
+            // Build ramparts at these positions
+            for (const pos of defensivePositions) {
+                // Skip if there's already a structure or construction site
+                const structures = pos.lookFor(LOOK_STRUCTURES);
+                const hasStructure = structures.some(s => 
+                    s.structureType === STRUCTURE_RAMPART || 
+                    s.structureType === STRUCTURE_WALL
+                );
+                
+                if (hasStructure) continue;
+                
+                const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+                const hasSite = sites.some(s => 
+                    s.structureType === STRUCTURE_RAMPART || 
+                    s.structureType === STRUCTURE_WALL
+                );
+                
+                if (!hasSite) {
+                    pos.createConstructionSite(STRUCTURE_RAMPART);
+                    return;
                 }
             }
         }
+    }
+    
+    /**
+     * Get defensive line positions 2 tiles from an exit
+     * Creates a line of positions until hitting a wall or connecting to walls
+     */
+    getDefensiveLine(room, exitDir, exitPositions) {
+        const defensivePositions = [];
+        const terrain = room.getTerrain();
+        
+        // Determine direction offset based on exit direction
+        let dx = 0, dy = 0;
+        switch (exitDir) {
+            case FIND_EXIT_TOP: dy = 2; break;      // Move down 2 from top
+            case FIND_EXIT_RIGHT: dx = -2; break;   // Move left 2 from right
+            case FIND_EXIT_BOTTOM: dy = -2; break;  // Move up 2 from bottom
+            case FIND_EXIT_LEFT: dx = 2; break;     // Move right 2 from left
+        }
+        
+        // Get the line of positions 2 tiles from exit
+        for (const exitPos of exitPositions) {
+            const x = exitPos.x + dx;
+            const y = exitPos.y + dy;
+            
+            if (x >= 0 && x <= 49 && y >= 0 && y <= 49) {
+                // Check if this position is valid (not a wall)
+                if (terrain.get(x, y) !== TERRAIN_MASK_WALL) {
+                    const pos = new RoomPosition(x, y, room.name);
+                    
+                    // Check if position is on a path (road or frequently used)
+                    // Also extend the line to create a barrier
+                    const extendedPositions = this.extendDefensiveLine(room, pos, exitDir, terrain);
+                    defensivePositions.push(...extendedPositions);
+                }
+            }
+        }
+        
+        // Remove duplicates
+        const uniquePositions = [];
+        const seen = new Set();
+        for (const pos of defensivePositions) {
+            const key = `${pos.x},${pos.y}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                uniquePositions.push(pos);
+            }
+        }
+        
+        return uniquePositions;
+    }
+    
+    /**
+     * Extend defensive line horizontally/vertically to create a barrier
+     */
+    extendDefensiveLine(room, startPos, exitDir, terrain) {
+        const positions = [startPos];
+        
+        // Determine extension direction (perpendicular to exit)
+        let extendX = 0, extendY = 0;
+        if (exitDir === FIND_EXIT_TOP || exitDir === FIND_EXIT_BOTTOM) {
+            extendX = 1; // Extend horizontally
+        } else {
+            extendY = 1; // Extend vertically
+        }
+        
+        // Extend in both directions until hitting walls
+        const directions = [1, -1];
+        for (const dir of directions) {
+            let x = startPos.x + extendX * dir;
+            let y = startPos.y + extendY * dir;
+            
+            while (x >= 1 && x <= 48 && y >= 1 && y <= 48) {
+                // Stop if we hit a wall
+                if (terrain.get(x, y) === TERRAIN_MASK_WALL) break;
+                
+                // Stop if we hit an existing wall or rampart
+                const pos = new RoomPosition(x, y, room.name);
+                const structures = pos.lookFor(LOOK_STRUCTURES);
+                const hasBarrier = structures.some(s => 
+                    s.structureType === STRUCTURE_WALL || 
+                    s.structureType === STRUCTURE_RAMPART
+                );
+                
+                if (hasBarrier) break;
+                
+                positions.push(pos);
+                
+                // Continue extending
+                x += extendX * dir;
+                y += extendY * dir;
+                
+                // Limit extension to reasonable length
+                if (positions.length > 10) break;
+            }
+        }
+        
+        return positions;
     }
     
     buildWalls(room) {

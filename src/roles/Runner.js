@@ -203,37 +203,51 @@ class Runner {
 
     deliverEnergy(creep) {
         // Get all possible delivery targets and sort by priority
+        // Priority: Spawn -> Towers (to 50%) -> Extensions
         const targets = [];
         
-        // Priority 1: Spawn
+        // Priority 1: Spawn (always fill first for spawning)
         const spawn = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
             filter: (s) => s.structureType === STRUCTURE_SPAWN &&
                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
         });
         if (spawn) targets.push({ type: 'spawn', obj: spawn });
         
-        // Priority 2: Extensions
-        const extensions = creep.room.find(FIND_MY_STRUCTURES, {
-            filter: (s) => s.structureType === STRUCTURE_EXTENSION &&
-                        s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-        });
-        if (extensions.length > 0) {
-            // Find closest extension
-            const closestExtension = creep.pos.findClosestByPath(extensions);
-            if (closestExtension) {
-                targets.push({ type: 'extension', obj: closestExtension });
-            }
-        }
-        
-        // Priority 3: Towers
+        // Priority 2: Towers - fill to at least 50% before filling extensions
+        // This ensures we have energy for defense
         const towers = creep.room.find(FIND_MY_STRUCTURES, {
             filter: (s) => s.structureType === STRUCTURE_TOWER &&
-                        s.store.getFreeCapacity(RESOURCE_ENERGY) > 100
+                        s.store.getUsedCapacity(RESOURCE_ENERGY) < s.store.getCapacity(RESOURCE_ENERGY) * 0.5
         });
         if (towers.length > 0) {
-            const closestTower = creep.pos.findClosestByPath(towers);
-            if (closestTower) {
-                targets.push({ type: 'tower', obj: closestTower });
+            // Sort by lowest energy percentage (fill emptiest first)
+            towers.sort((a, b) => {
+                const pctA = a.store.getUsedCapacity(RESOURCE_ENERGY) / a.store.getCapacity(RESOURCE_ENERGY);
+                const pctB = b.store.getUsedCapacity(RESOURCE_ENERGY) / b.store.getCapacity(RESOURCE_ENERGY);
+                return pctA - pctB;
+            });
+            const neediestTower = towers[0];
+            targets.push({ type: 'tower', obj: neediestTower });
+        }
+        
+        // Priority 3: Extensions (only fill if towers are above 50%)
+        const towersLow = creep.room.find(FIND_MY_STRUCTURES, {
+            filter: (s) => s.structureType === STRUCTURE_TOWER &&
+                        s.store.getUsedCapacity(RESOURCE_ENERGY) < s.store.getCapacity(RESOURCE_ENERGY) * 0.5
+        });
+        
+        if (towersLow.length === 0) {
+            // All towers are above 50%, can fill extensions now
+            const extensions = creep.room.find(FIND_MY_STRUCTURES, {
+                filter: (s) => s.structureType === STRUCTURE_EXTENSION &&
+                            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+            });
+            if (extensions.length > 0) {
+                // Find closest extension
+                const closestExtension = creep.pos.findClosestByPath(extensions);
+                if (closestExtension) {
+                    targets.push({ type: 'extension', obj: closestExtension });
+                }
             }
         }
         

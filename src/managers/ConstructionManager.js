@@ -35,7 +35,7 @@ class ConstructionManager {
         
         if (rcl >= 2) {
             this.buildExtensions(room);
-            this.buildRamparts(room); // Phase 6: Ramparts (available at RCL 2)
+            this.buildDefensiveWalls(room); // Phase 6: Walls with 1 rampart per exit
         }
         
         if (rcl >= 3) {
@@ -407,10 +407,10 @@ class ConstructionManager {
         }
     }
     
-    buildRamparts(room) {
-        // Phase 6: Build ramparts at room entrances to defend against invaders
-        // Strategy: Build ramparts 2 tiles from exits in a line until hitting walls
-        // This forces enemies to walk through a chokepoint protected by ramparts
+    buildDefensiveWalls(room) {
+        // Phase 6: Build walls at room entrances with 1 rampart per exit
+        // Strategy: Build walls along exit line, place 1 rampart in center for clear path
+        // Rampart allows walking through, creating a chokepoint
         
         const exitDirections = [FIND_EXIT_TOP, FIND_EXIT_RIGHT, FIND_EXIT_BOTTOM, FIND_EXIT_LEFT];
         
@@ -421,27 +421,36 @@ class ConstructionManager {
             // Find positions 2 tiles from the exit
             const defensivePositions = this.getDefensiveLine(room, exitDir, exitPositions);
             
-            // Build ramparts at these positions
-            for (const pos of defensivePositions) {
+            if (defensivePositions.length === 0) continue;
+            
+            // Find center position for rampart - this creates the clear path
+            const centerIndex = Math.floor(defensivePositions.length / 2);
+            
+            // Build walls at all positions except center (rampart)
+            for (let i = 0; i < defensivePositions.length; i++) {
+                const pos = defensivePositions[i];
+                const isCenter = (i === centerIndex);
+                
                 // Skip if there's already a structure or construction site
                 const structures = pos.lookFor(LOOK_STRUCTURES);
-                const hasStructure = structures.some(s => 
-                    s.structureType === STRUCTURE_RAMPART || 
-                    s.structureType === STRUCTURE_WALL
-                );
+                const hasWall = structures.some(s => s.structureType === STRUCTURE_WALL);
+                const hasRampart = structures.some(s => s.structureType === STRUCTURE_RAMPART);
                 
-                if (hasStructure) continue;
+                if (hasWall || hasRampart) continue;
                 
                 const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
-                const hasSite = sites.some(s => 
-                    s.structureType === STRUCTURE_RAMPART || 
-                    s.structureType === STRUCTURE_WALL
-                );
+                const hasWallSite = sites.some(s => s.structureType === STRUCTURE_WALL);
+                const hasRampartSite = sites.some(s => s.structureType === STRUCTURE_RAMPART);
                 
-                if (!hasSite) {
+                if (hasWallSite || hasRampartSite) continue;
+                
+                // Place rampart at center (creates clear path), walls elsewhere (blocks path)
+                if (isCenter) {
                     pos.createConstructionSite(STRUCTURE_RAMPART);
-                    return;
+                } else {
+                    pos.createConstructionSite(STRUCTURE_WALL);
                 }
+                return; // Build one per tick
             }
         }
     }

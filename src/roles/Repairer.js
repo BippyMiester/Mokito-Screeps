@@ -153,12 +153,27 @@ class Repairer {
         const constructionSite = creep.pos.findClosestByPath(FIND_CONSTRUCTION_SITES);
         if (constructionSite) {
             if (creep.build(constructionSite) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(constructionSite);
+                creep.moveTo(constructionSite, { visualizePathStyle: { stroke: '#ffaa00' } });
             }
+            creep.say('🔨 help');
             return;
         }
 
-        // Priority 2: Containers (critical for energy flow)
+        // Priority 2: Ramparts (highest priority for defense)
+        const rampart = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_RAMPART &&
+                        s.hits < s.hitsMax * 0.8 // Repair when below 80%
+        });
+
+        if (rampart) {
+            if (creep.repair(rampart) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(rampart);
+            }
+            creep.say('🛡️ rampart');
+            return;
+        }
+
+        // Priority 3: Containers (critical for energy flow)
         const container = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_CONTAINER &&
                         s.hits < s.hitsMax * 0.8
@@ -168,10 +183,11 @@ class Repairer {
             if (creep.repair(container) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(container);
             }
+            creep.say('🔧 repair');
             return;
         }
 
-        // Priority 3: Roads
+        // Priority 4: Roads
         const road = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_ROAD &&
                         s.hits < s.hitsMax * 0.5
@@ -181,32 +197,21 @@ class Repairer {
             if (creep.repair(road) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(road);
             }
+            creep.say('🔧 repair');
             return;
         }
 
-        // Priority 4: Ramparts (maintain at safe level)
-        const rampart = creep.pos.findClosestByPath(FIND_STRUCTURES, {
-            filter: s => s.structureType === STRUCTURE_RAMPART &&
-                        s.hits < 1000000 // 1M hits minimum
-        });
-
-        if (rampart) {
-            if (creep.repair(rampart) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(rampart);
-            }
-            return;
-        }
-
-        // Priority 5: Walls
+        // Priority 5: Walls (lowest priority)
         const wall = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_WALL &&
-                        s.hits < 1000000
+                        s.hits < s.hitsMax * 0.5
         });
 
         if (wall) {
             if (creep.repair(wall) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(wall);
             }
+            creep.say('🔧 wall');
             return;
         }
 

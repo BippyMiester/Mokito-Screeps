@@ -1377,12 +1377,27 @@ class Repairer {
         const constructionSite = creep.pos.findClosestByPath(FIND_CONSTRUCTION_SITES);
         if (constructionSite) {
             if (creep.build(constructionSite) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(constructionSite);
+                creep.moveTo(constructionSite, { visualizePathStyle: { stroke: '#ffaa00' } });
             }
+            creep.say('🔨 help');
             return;
         }
 
-        // Priority 2: Containers (critical for energy flow)
+        // Priority 2: Ramparts (highest priority for defense)
+        const rampart = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_RAMPART &&
+                        s.hits < s.hitsMax * 0.8 // Repair when below 80%
+        });
+
+        if (rampart) {
+            if (creep.repair(rampart) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(rampart);
+            }
+            creep.say('🛡️ rampart');
+            return;
+        }
+
+        // Priority 3: Containers (critical for energy flow)
         const container = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_CONTAINER &&
                         s.hits < s.hitsMax * 0.8
@@ -1392,10 +1407,11 @@ class Repairer {
             if (creep.repair(container) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(container);
             }
+            creep.say('🔧 repair');
             return;
         }
 
-        // Priority 3: Roads
+        // Priority 4: Roads
         const road = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_ROAD &&
                         s.hits < s.hitsMax * 0.5
@@ -1405,32 +1421,21 @@ class Repairer {
             if (creep.repair(road) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(road);
             }
+            creep.say('🔧 repair');
             return;
         }
 
-        // Priority 4: Ramparts (maintain at safe level)
-        const rampart = creep.pos.findClosestByPath(FIND_STRUCTURES, {
-            filter: s => s.structureType === STRUCTURE_RAMPART &&
-                        s.hits < 1000000 // 1M hits minimum
-        });
-
-        if (rampart) {
-            if (creep.repair(rampart) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(rampart);
-            }
-            return;
-        }
-
-        // Priority 5: Walls
+        // Priority 5: Walls (lowest priority)
         const wall = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_WALL &&
-                        s.hits < 1000000
+                        s.hits < s.hitsMax * 0.5
         });
 
         if (wall) {
             if (creep.repair(wall) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(wall);
             }
+            creep.say('🔧 wall');
             return;
         }
 
@@ -3447,7 +3452,7 @@ class ConstructionManager {
         
         if (rcl >= 2) {
             this.buildExtensions(room);
-            this.buildRamparts(room); // Phase 6: Ramparts (available at RCL 2)
+            this.buildDefensiveWalls(room); // Phase 6: Walls with 1 rampart per exit
         }
         
         if (rcl >= 3) {
@@ -3819,10 +3824,10 @@ class ConstructionManager {
         }
     }
     
-    buildRamparts(room) {
-        // Phase 6: Build ramparts at room entrances to defend against invaders
-        // Strategy: Build ramparts 2 tiles from exits in a line until hitting walls
-        // This forces enemies to walk through a chokepoint protected by ramparts
+    buildDefensiveWalls(room) {
+        // Phase 6: Build walls at room entrances with 1 rampart per exit
+        // Strategy: Build walls along exit line, place 1 rampart in center for clear path
+        // Rampart allows walking through, creating a chokepoint
         
         const exitDirections = [FIND_EXIT_TOP, FIND_EXIT_RIGHT, FIND_EXIT_BOTTOM, FIND_EXIT_LEFT];
         
@@ -3833,27 +3838,36 @@ class ConstructionManager {
             // Find positions 2 tiles from the exit
             const defensivePositions = this.getDefensiveLine(room, exitDir, exitPositions);
             
-            // Build ramparts at these positions
-            for (const pos of defensivePositions) {
+            if (defensivePositions.length === 0) continue;
+            
+            // Find center position for rampart - this creates the clear path
+            const centerIndex = Math.floor(defensivePositions.length / 2);
+            
+            // Build walls at all positions except center (rampart)
+            for (let i = 0; i < defensivePositions.length; i++) {
+                const pos = defensivePositions[i];
+                const isCenter = (i === centerIndex);
+                
                 // Skip if there's already a structure or construction site
                 const structures = pos.lookFor(LOOK_STRUCTURES);
-                const hasStructure = structures.some(s => 
-                    s.structureType === STRUCTURE_RAMPART || 
-                    s.structureType === STRUCTURE_WALL
-                );
+                const hasWall = structures.some(s => s.structureType === STRUCTURE_WALL);
+                const hasRampart = structures.some(s => s.structureType === STRUCTURE_RAMPART);
                 
-                if (hasStructure) continue;
+                if (hasWall || hasRampart) continue;
                 
                 const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
-                const hasSite = sites.some(s => 
-                    s.structureType === STRUCTURE_RAMPART || 
-                    s.structureType === STRUCTURE_WALL
-                );
+                const hasWallSite = sites.some(s => s.structureType === STRUCTURE_WALL);
+                const hasRampartSite = sites.some(s => s.structureType === STRUCTURE_RAMPART);
                 
-                if (!hasSite) {
+                if (hasWallSite || hasRampartSite) continue;
+                
+                // Place rampart at center (creates clear path), walls elsewhere (blocks path)
+                if (isCenter) {
                     pos.createConstructionSite(STRUCTURE_RAMPART);
-                    return;
+                } else {
+                    pos.createConstructionSite(STRUCTURE_WALL);
                 }
+                return; // Build one per tick
             }
         }
     }

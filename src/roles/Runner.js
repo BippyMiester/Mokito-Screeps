@@ -168,6 +168,22 @@ class Runner {
             return;
         }
 
+        // Priority 4: No energy available - mine it ourselves
+        // Runners have WORK parts, so they can mine as backup
+        const source = creep.pos.findClosestByPath(FIND_SOURCES);
+        if (source) {
+            if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(source, { visualizePathStyle: { stroke: '#ffaa00' } });
+            } else {
+                creep.say('⛏️ mine');
+                if (creep.store.getFreeCapacity() === 0) {
+                    creep.memory.delivering = true;
+                    creep.say('📦 deliver');
+                }
+            }
+            return;
+        }
+
         // If no energy available, check if we have energy to upgrade controller
         if (creep.store[RESOURCE_ENERGY] > 0) {
             // Have energy but nothing to collect - upgrade as idle behavior

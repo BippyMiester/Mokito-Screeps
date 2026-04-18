@@ -56,7 +56,7 @@ class SpawnManager {
 
         // === PHASE 1: HARVESTERS ===
         // Required: open_spaces / 2 (rounded down)
-        const requiredHarvesters = Math.floor(totalSourcePositions / 2);
+        const requiredHarvesters = Math.ceil(totalSourcePositions / 2);
         if (harvesters.length < requiredHarvesters) {
             this.spawnHarvester(spawn, sources, room, creeps);
             return;
@@ -126,7 +126,7 @@ class SpawnManager {
      * Get spawn priority for heartbeat display
      */
     getNextSpawnPriority(room, harvesterCount, upgraderCount, builderCount, repairerCount, runnerCount, totalSourcePositions) {
-        const requiredHarvesters = Math.floor(totalSourcePositions / 2);
+        const requiredHarvesters = Math.ceil(totalSourcePositions / 2);
         const priorities = [];
 
         // Phase 1: Harvesters
@@ -247,7 +247,8 @@ class SpawnManager {
 
     spawnRunner(spawn, energyCapacity, room, creeps) {
         const name = 'Runner' + Game.time;
-        const result = spawn.spawnCreep([CARRY, CARRY, MOVE, MOVE], name, {
+        // Add WORK part so runners can mine as backup when no energy is available
+        const result = spawn.spawnCreep([WORK, CARRY, CARRY, MOVE, MOVE], name, {
             memory: { role: 'runner' }
         });
 

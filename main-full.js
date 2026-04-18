@@ -607,6 +607,22 @@ class Runner {
             return;
         }
 
+        // Priority 4: No energy available - mine it ourselves
+        // Runners have WORK parts, so they can mine as backup
+        const source = creep.pos.findClosestByPath(FIND_SOURCES);
+        if (source) {
+            if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(source, { visualizePathStyle: { stroke: '#ffaa00' } });
+            } else {
+                creep.say('⛏️ mine');
+                if (creep.store.getFreeCapacity() === 0) {
+                    creep.memory.delivering = true;
+                    creep.say('📦 deliver');
+                }
+            }
+            return;
+        }
+
         // If no energy available, check if we have energy to upgrade controller
         if (creep.store[RESOURCE_ENERGY] > 0) {
             // Have energy but nothing to collect - upgrade as idle behavior
@@ -3414,7 +3430,8 @@ class ConstructionManager {
         
         // Get existing construction sites count
         const sites = room.find(FIND_CONSTRUCTION_SITES);
-        if (sites.length >= 5) return; // Don't overwhelm with construction
+        // Allow up to 8 construction sites, but prioritize extensions
+        if (sites.length >= 8) return;
         
         // Initialize room construction memory
         if (!Memory.rooms[room.name].construction) {
@@ -3479,7 +3496,6 @@ class ConstructionManager {
                 const pos = this.findContainerPosition(source);
                 if (pos) {
                     pos.createConstructionSite(STRUCTURE_CONTAINER);
-                    console.log('📦 Building container at source ' + source.id);
                     return;
                 }
             }
@@ -3605,21 +3621,38 @@ class ConstructionManager {
         const spawn = room.find(FIND_MY_SPAWNS)[0];
         if (!spawn) return;
         
-        // Get current extension count
+        // Get current extension count (built + construction sites)
         const extensions = room.find(FIND_MY_STRUCTURES, {
             filter: { structureType: STRUCTURE_EXTENSION }
         });
+        const extensionSites = room.find(FIND_CONSTRUCTION_SITES, {
+            filter: { structureType: STRUCTURE_EXTENSION }
+        });
         
+        const totalCount = extensions.length + extensionSites.length;
         const maxExtensions = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.controller.level] || 0;
         
-        if (extensions.length < maxExtensions) {
-            // Place extensions in a pattern around spawn (better than random placement)
-            this.placeExtensionPattern(room, spawn.pos, extensions.length, maxExtensions);
+        // Build up to 5 extensions or max allowed, whichever is less
+        const targetExtensions = Math.min(5, maxExtensions);
+        
+        if (totalCount < targetExtensions) {
+            const needed = targetExtensions - totalCount;
+            // Try to place ALL remaining extensions at once
+            let placed = 0;
+            for (let attempt = 0; attempt < needed * 50 && placed < needed; attempt++) {
+                const result = this.placeExtensionPattern(room, spawn.pos, totalCount + placed, targetExtensions);
+                if (result) {
+                    placed++;
+                } else {
+                    break;
+                }
+            }
         }
     }
     
     /**
      * Place extensions in a diamond pattern around spawn for optimal pathing
+     * Avoids roads, existing structures, and sources
      */
     placeExtensionPattern(room, spawnPos, currentCount, maxCount) {
         // Diamond pattern offsets (prioritize closer to spawn)
@@ -3640,25 +3673,104 @@ class ConstructionManager {
             {x: -1, y: -4}
         ];
         
-        // Skip already placed extensions
-        const startIndex = currentCount;
+        // Get sources to avoid building too close
+        const sources = room.find(FIND_SOURCES);
         
-        for (let i = startIndex; i < pattern.length && i < maxCount; i++) {
+        // Try each position in pattern
+        for (let i = 0; i < pattern.length; i++) {
             const offset = pattern[i];
             const x = spawnPos.x + offset.x;
             const y = spawnPos.y + offset.y;
             
-            if (x >= 1 && x <= 48 && y >= 1 && y <= 48) {
+            if (x >= 2 && x <= 47 && y >= 2 && y <= 47) {
                 const pos = new RoomPosition(x, y, room.name);
-                const terrain = pos.lookFor(LOOK_TERRAIN);
                 
-                if (terrain.length > 0 && terrain[0] !== 'wall') {
-                    const structures = pos.lookFor(LOOK_STRUCTURES);
-                    const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+                // Check if this position is valid
+                if (this.isValidExtensionPosition(room, pos, sources)) {
+                    const result = pos.createConstructionSite(STRUCTURE_EXTENSION);
+                    if (result === OK) {
+                        return true; // Success
+                    }
+                }
+            }
+        }
+        
+        // If pattern didn't work, try random positions near spawn
+        return this.placeExtensionRandom(room, spawnPos, currentCount, maxCount, sources);
+    }
+    
+    /**
+     * Check if a position is valid for placing an extension
+     */
+    isValidExtensionPosition(room, pos, sources) {
+        const terrain = pos.lookFor(LOOK_TERRAIN);
+        
+        // Check for walls
+        if (terrain.length > 0 && terrain[0] === 'wall') {
+            return false;
+        }
+        
+        // Check for existing structures
+        const structures = pos.lookFor(LOOK_STRUCTURES);
+        if (structures.length > 0) {
+            return false; // Blocked by structure
+        }
+        
+        // Check for construction sites
+        const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+        if (sites.length > 0) {
+            return false; // Already has construction site
+        }
+        
+        // Check for roads (don't build over roads)
+        const roads = pos.lookFor(LOOK_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_ROAD
+        });
+        if (roads.length > 0) {
+            return false;
+        }
+        
+        // Check for road construction sites
+        const roadSites = pos.lookFor(LOOK_CONSTRUCTION_SITES, {
+            filter: s => s.structureType === STRUCTURE_ROAD
+        });
+        if (roadSites.length > 0) {
+            return false;
+        }
+        
+        // Check distance from sources (must be at least 2 tiles away)
+        for (const source of sources) {
+            if (pos.getRangeTo(source) < 2) {
+                return false; // Too close to source
+            }
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Place extension at random valid position near spawn
+     */
+    placeExtensionRandom(room, spawnPos, currentCount, maxCount, sources) {
+        // Try positions in increasing distance from spawn
+        for (let range = 2; range <= 10; range++) {
+            for (let dx = -range; dx <= range; dx++) {
+                for (let dy = -range; dy <= range; dy++) {
+                    // Only check positions at this exact range
+                    if (Math.abs(dx) + Math.abs(dy) !== range) continue;
                     
-                    if (structures.length === 0 && sites.length === 0) {
-                        pos.createConstructionSite(STRUCTURE_EXTENSION);
-                        return; // Place one at a time
+                    const x = spawnPos.x + dx;
+                    const y = spawnPos.y + dy;
+                    
+                    if (x >= 2 && x <= 47 && y >= 2 && y <= 47) {
+                        const pos = new RoomPosition(x, y, room.name);
+                        
+                        if (this.isValidExtensionPosition(room, pos, sources)) {
+                            const result = pos.createConstructionSite(STRUCTURE_EXTENSION);
+                            if (result === OK) {
+                                return;
+                            }
+                        }
                     }
                 }
             }
@@ -4051,7 +4163,7 @@ class SpawnManager {
 
         // === PHASE 1: HARVESTERS ===
         // Required: open_spaces / 2 (rounded down)
-        const requiredHarvesters = Math.floor(totalSourcePositions / 2);
+        const requiredHarvesters = Math.ceil(totalSourcePositions / 2);
         if (harvesters.length < requiredHarvesters) {
             this.spawnHarvester(spawn, sources, room, creeps);
             return;
@@ -4121,7 +4233,7 @@ class SpawnManager {
      * Get spawn priority for heartbeat display
      */
     getNextSpawnPriority(room, harvesterCount, upgraderCount, builderCount, repairerCount, runnerCount, totalSourcePositions) {
-        const requiredHarvesters = Math.floor(totalSourcePositions / 2);
+        const requiredHarvesters = Math.ceil(totalSourcePositions / 2);
         const priorities = [];
 
         // Phase 1: Harvesters
@@ -4242,7 +4354,8 @@ class SpawnManager {
 
     spawnRunner(spawn, energyCapacity, room, creeps) {
         const name = 'Runner' + Game.time;
-        const result = spawn.spawnCreep([CARRY, CARRY, MOVE, MOVE], name, {
+        // Add WORK part so runners can mine as backup when no energy is available
+        const result = spawn.spawnCreep([WORK, CARRY, CARRY, MOVE, MOVE], name, {
             memory: { role: 'runner' }
         });
 
@@ -5029,7 +5142,7 @@ class Mokito {
      */
     checkPhaseCriteria(phase, metrics) {
         // Calculate required harvesters: open spaces / 2, rounded down
-        const requiredHarvesters = Math.floor(metrics.totalSourcePositions / 2);
+        const requiredHarvesters = Math.ceil(metrics.totalSourcePositions / 2);
 
         switch (phase) {
             case 1: // Phase 1: Harvesters
@@ -5123,23 +5236,24 @@ class Mokito {
 
     /**
      * Get next phase requirements
+     * Returns what's needed to ADVANCE to the next phase
      */
     getNextPhaseRequirements(currentPhase, metrics) {
-        const requiredHarvesters = Math.floor(metrics.totalSourcePositions / 2);
+        const requiredHarvesters = Math.ceil(metrics.totalSourcePositions / 2);
 
         switch (currentPhase) {
             case 1:
-                return [`${requiredHarvesters}+ harvesters (open spaces / 2)`];
+                return ['3+ upgraders (for Phase 2)'];
             case 2:
-                return ['3+ upgraders'];
+                return ['3+ builders', '5+ extensions BUILT (for Phase 3)'];
             case 3:
-                return ['3+ builders', '5+ extensions BUILT'];
+                return ['3+ runners', '2+ repairers (for Phase 4)'];
             case 4:
-                return ['3+ runners', '2+ repairers'];
+                return ['10+ roads (for Phase 5)'];
             case 5:
-                return ['10+ roads'];
+                return ['Ramparts at exits (for Phase 6)'];
             case 6:
-                return ['Ramparts at exits'];
+                return ['Phase 6 complete!'];
             default:
                 return ['Phase not yet implemented'];
         }

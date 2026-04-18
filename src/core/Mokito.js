@@ -177,7 +177,7 @@ class Mokito {
      */
     checkPhaseCriteria(phase, metrics) {
         // Calculate required harvesters: open spaces / 2, rounded down
-        const requiredHarvesters = Math.floor(metrics.totalSourcePositions / 2);
+        const requiredHarvesters = Math.ceil(metrics.totalSourcePositions / 2);
 
         switch (phase) {
             case 1: // Phase 1: Harvesters
@@ -271,23 +271,24 @@ class Mokito {
 
     /**
      * Get next phase requirements
+     * Returns what's needed to ADVANCE to the next phase
      */
     getNextPhaseRequirements(currentPhase, metrics) {
-        const requiredHarvesters = Math.floor(metrics.totalSourcePositions / 2);
+        const requiredHarvesters = Math.ceil(metrics.totalSourcePositions / 2);
 
         switch (currentPhase) {
             case 1:
-                return [`${requiredHarvesters}+ harvesters (open spaces / 2)`];
+                return ['3+ upgraders (for Phase 2)'];
             case 2:
-                return ['3+ upgraders'];
+                return ['3+ builders', '5+ extensions BUILT (for Phase 3)'];
             case 3:
-                return ['3+ builders', '5+ extensions BUILT'];
+                return ['3+ runners', '2+ repairers (for Phase 4)'];
             case 4:
-                return ['3+ runners', '2+ repairers'];
+                return ['10+ roads (for Phase 5)'];
             case 5:
-                return ['10+ roads'];
+                return ['Ramparts at exits (for Phase 6)'];
             case 6:
-                return ['Ramparts at exits'];
+                return ['Phase 6 complete!'];
             default:
                 return ['Phase not yet implemented'];
         }

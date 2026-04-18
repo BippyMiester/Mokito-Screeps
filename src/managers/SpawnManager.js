@@ -67,21 +67,12 @@ class SpawnManager {
             room.memory.stationaryMode = false;
             room.memory.harvesterMode = 'traditional';
             
-            // In Phase 1, use basic body but spawn ASAP
-            // Body: MOVE, WORK, CARRY = 200 energy
-            // Or with extra CARRY: MOVE, WORK, CARRY, CARRY = 250 energy (if available)
-            let body;
-            if (energyAvailable >= 250) {
-                body = [WORK, CARRY, CARRY, MOVE]; // 250 energy - better early game
-            } else if (energyAvailable >= 200) {
-                body = [WORK, CARRY, MOVE]; // 200 energy - minimum
-            }
-            
-            if (body) {
+            // Spawn basic harvester ASAP
+            if (energyAvailable >= 200) {
                 const name = 'Harvester' + Game.time;
                 const source = sources[0];
                 if (source) {
-                    spawn.spawnCreep(body, name, {
+                    spawn.spawnCreep([WORK, CARRY, MOVE], name, {
                         memory: { 
                             role: 'harvester', 
                             sourceId: source.id,
@@ -89,38 +80,57 @@ class SpawnManager {
                         }
                     });
                 }
+                room.memory.waitingForEnergy = false;
+            } else {
+                room.memory.waitingForEnergy = true;
             }
-            room.memory.waitingForEnergy = !body;
             return;
         }
 
-        // PHASE 1 CONTINUED: We have 2+ harvesters, now need runner
-        // Phase 1 priority: Runner before upgrader!
-        if (isPhase1 && runners.length < 1) {
-            // Spawn runner with minimal body
-            // Body: 2x CARRY + 2x MOVE = 200 energy (minimum)
-            // Or: 4x CARRY + 2x MOVE = 300 energy (if available)
-            let body;
-            if (energyAvailable >= 300) {
-                body = [CARRY, CARRY, CARRY, CARRY, MOVE, MOVE]; // 4 carry, 2 move
-            } else if (energyAvailable >= 200) {
-                body = [CARRY, CARRY, MOVE, MOVE]; // 2 carry, 2 move
-            }
+        // CRITICAL: Stationary mode with no runners = DEADLOCK
+        // Harvesters drop energy but nothing picks it up
+        // This takes priority over everything except emergency harvesters
+        if (inStationaryMode && runners.length < 1) {
+            // Temporarily switch back to traditional mode until we have runners
+            console.log('⚠️  STATIONARY DEADLOCK: No runners! Switching to traditional mode');
+            room.memory.harvesterMode = 'traditional';
+            room.memory.stationaryMode = false;
             
-            if (body) {
+            // Spawn a runner immediately with whatever we have
+            if (energyAvailable >= 200) {
                 const name = 'Runner' + Game.time;
-                spawn.spawnCreep(body, name, {
+                spawn.spawnCreep([CARRY, CARRY, MOVE, MOVE], name, {
                     memory: { role: 'runner' }
                 });
+                console.log('🏃 Emergency runner spawned');
+                room.memory.waitingForEnergy = false;
+            } else {
+                room.memory.waitingForEnergy = true;
             }
-            room.memory.waitingForEnergy = !body;
+            return;
+        }
+
+        // PHASE 1 CONTINUED: We have 2+ harvesters in traditional mode, now need runner
+        if (isPhase1 && runners.length < 1) {
+            if (energyAvailable >= 200) {
+                const name = 'Runner' + Game.time;
+                spawn.spawnCreep([CARRY, CARRY, MOVE, MOVE], name, {
+                    memory: { role: 'runner' }
+                });
+                room.memory.waitingForEnergy = false;
+            } else {
+                room.memory.waitingForEnergy = true;
+            }
             return;
         }
 
         // Energy budget check - use getMaxBudget to determine if we can spawn
+        // CRITICAL: Never go below 35% energy reserve for emergencies
         // Emergency: < 3 creeps - spawn immediately if we have 200+ energy
         // Otherwise, only use 65% of energy capacity for spawning
+        const minReserve = Math.floor(energyCapacity * 0.35); // 35% minimum reserve
         const maxSpawnBudget = this.getMaxBudget(energyCapacity, creeps);
+        const usableEnergy = energyAvailable - minReserve; // Energy we can actually spend
         
         // Check if we're in critical need (no runners in stationary mode)
         const criticalNeedRunner = inStationaryMode && runners.length < 1 && harvesters.length >= 2;
@@ -134,7 +144,12 @@ class SpawnManager {
             minEnergyNeeded = Math.min(maxSpawnBudget, 500); // At least 500 for decent body
         }
         
-        if (energyAvailable < minEnergyNeeded) {
+        // Check if we have enough USABLE energy (above 35% reserve)
+        if (usableEnergy < minEnergyNeeded) {
+            // We have energy but can't spend it without dropping below 35% reserve
+            const percentAvailable = Math.floor((energyAvailable / energyCapacity) * 100);
+            const percentUsable = Math.floor((usableEnergy / energyCapacity) * 100);
+            console.log(`⏳ Energy: ${energyAvailable}/${energyCapacity} (${percentAvailable}%), usable: ${usableEnergy} (${percentUsable}%), need: ${minEnergyNeeded}`);
             room.memory.waitingForEnergy = true;
             return;
         }
@@ -145,7 +160,7 @@ class SpawnManager {
         if (isPhase2) {
             // Spawn upgrader with minimal body
             // Body: WORK, CARRY, MOVE = 200 energy
-            if (energyAvailable >= 200) {
+            if (usableEnergy >= 200) {
                 this.spawnUpgrader(spawn, energyCapacity, room, creeps);
             }
             return;
@@ -157,8 +172,8 @@ class SpawnManager {
             const tier = this.getBodyTier(room, creeps, 'harvester');
             const cost = this.getHarvesterCost(energyCapacity, tier, creeps);
             
-            // Check if we have enough energy for the desired body
-            if (energyAvailable >= cost) {
+            // Check if we have enough USABLE energy for the desired body
+            if (usableEnergy >= cost) {
                 // Assign to source with fewest harvesters
                 let bestSource = sources[0];
                 let minHarvesters = Infinity;
@@ -172,7 +187,7 @@ class SpawnManager {
                 }
                 
                 this.spawnHarvester(spawn, bestSource, energyCapacity, room, creeps);
-            } else if (energyAvailable >= 200) {
+            } else if (usableEnergy >= 200) {
                 // Can't afford full body but can afford basic - spawn basic
                 let bestSource = sources[0];
                 let minHarvesters = Infinity;

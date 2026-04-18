@@ -4016,9 +4016,6 @@ class SpawnManager {
         // Check if we have enough USABLE energy (above 35% reserve)
         if (usableEnergy < minEnergyNeeded) {
             // We have energy but can't spend it without dropping below 35% reserve
-            const percentAvailable = Math.floor((energyAvailable / energyCapacity) * 100);
-            const percentUsable = Math.floor((usableEnergy / energyCapacity) * 100);
-            console.log(`⏳ Energy: ${energyAvailable}/${energyCapacity} (${percentAvailable}%), usable: ${usableEnergy} (${percentUsable}%), need: ${minEnergyNeeded}`);
             room.memory.waitingForEnergy = true;
             return;
         }

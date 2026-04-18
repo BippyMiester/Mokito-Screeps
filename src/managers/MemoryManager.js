@@ -18,6 +18,11 @@ class MemoryManager {
             };
         }
         
+        // Initialize Memory.rooms if not exists
+        if (!Memory.rooms) {
+            Memory.rooms = {};
+        }
+        
         // Initialize room memory structures
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];

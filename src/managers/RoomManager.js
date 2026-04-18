@@ -387,8 +387,8 @@ class RoomManager {
             return;
         }
         
-        // Scout for new rooms
-        if (Game.time % 100 === 0) {
+        // Scout for new rooms - do immediately if no remote rooms known, then every 100 ticks
+        if (room.memory.remoteRooms.length === 0 || Game.time % 100 === 0) {
             this.scoutRemoteRooms(room);
         }
         
@@ -397,6 +397,11 @@ class RoomManager {
         
         // Spawn remote workers if needed
         this.spawnRemoteWorkers(room);
+        
+        // Debug logging - remove after fixing
+        if (Game.time % 60 === 0) {
+            console.log(`Remote: ${room.memory.remoteRooms.length} rooms, need: RH:${room.memory.neededRemoteHarvesters} H:${room.memory.neededHaulers} C:${room.memory.neededClaimers}`);
+        }
     }
     
     scoutRemoteRooms(room) {
@@ -527,7 +532,7 @@ class RoomManager {
                 if (!sourceAssignment.harvester) {
                     neededRemoteHarvesters++;
                 }
-                if (!sourceAssignment.hauler && sourceAssignment.harvester) {
+                if (!sourceAssignment.hauler && sourceAssignment.harvester && neededHaulers < 3) {
                     neededHaulers++;
                 }
             }

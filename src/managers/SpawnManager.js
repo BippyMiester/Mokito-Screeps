@@ -221,8 +221,8 @@ class SpawnManager {
 
         // PHASE 3 (Stationary Mode): Spawn Runners first
         // Runners move energy from dropped locations to spawn/extensions
-        // Ratio: 1 runner per 2 harvesters
-        const desiredRunners = Math.ceil(harvesters.length / 2);
+        // Max 3 runners total
+        const desiredRunners = Math.min(3, Math.ceil(harvesters.length / 2));
         if (runners.length < desiredRunners) {
             const tier = this.getBodyTier(room, creeps, 'runner');
             const bodyCost = this.getRunnerCost(energyCapacity, tier, creeps);
@@ -239,8 +239,8 @@ class SpawnManager {
         }
 
         // PHASE 3 (Stationary Mode): Spawn Upgraders after Runners
-        // Calculate desired upgraders: 1 per 1 harvester (1:1 ratio), minimum 1
-        const desiredUpgraders = Math.max(1, harvesters.length);
+        // Calculate desired upgraders: 1 per 1 harvester (1:1 ratio), minimum 1, max 3
+        const desiredUpgraders = Math.min(3, Math.max(1, harvesters.length));
         if (upgraders.length < desiredUpgraders) {
             const bodyCost = this.getUpgraderCost(energyCapacity, this.getBodyTier(room, creeps, 'upgrader'), creeps);
             if (energyAvailable >= bodyCost) {
@@ -249,8 +249,59 @@ class SpawnManager {
             return;
         }
 
-        // PHASE 4: Builders and Repairers
-        // Only spawn after harvesters, runners, and upgraders are complete
+        // PHASE 4: Remote Workers (Multi-Room Harvesting) - Priority before builders
+        // Spawn remote harvesters for adjacent rooms
+        const neededRemoteHarvesters = room.memory.neededRemoteHarvesters || 0;
+        const neededHaulers = room.memory.neededHaulers || 0;
+        const neededClaimers = room.memory.neededClaimers || 0;
+        
+        // Remote workers have high priority for economy expansion
+        if (neededRemoteHarvesters > 0) {
+            const bodyCost = this.getRemoteHarvesterCost(energyCapacity);
+            if (usableEnergy >= bodyCost) {
+                this.spawnRemoteHarvester(spawn, energyCapacity, room.name);
+                return;
+            } else if (usableEnergy >= 200) {
+                // Can't afford full body - spawn basic remote harvester
+                const name = 'RemoteHarvester' + Game.time;
+                spawn.spawnCreep([WORK, CARRY, MOVE], name, {
+                    memory: { 
+                        role: 'remoteharvester',
+                        homeRoom: room.name
+                    }
+                });
+                return;
+            }
+        }
+        
+        if (neededHaulers > 0) {
+            const bodyCost = this.getHaulerCost(energyCapacity);
+            if (usableEnergy >= bodyCost) {
+                this.spawnHauler(spawn, energyCapacity, room.name);
+                return;
+            } else if (usableEnergy >= 200) {
+                // Can't afford full body - spawn basic hauler
+                const name = 'Hauler' + Game.time;
+                spawn.spawnCreep([CARRY, CARRY, MOVE, MOVE], name, {
+                    memory: { 
+                        role: 'hauler',
+                        homeRoom: room.name
+                    }
+                });
+                return;
+            }
+        }
+        
+        if (neededClaimers > 0) {
+            const bodyCost = this.getClaimerCost(energyCapacity);
+            if (usableEnergy >= bodyCost) {
+                this.spawnClaimer(spawn, room.name);
+                return;
+            }
+        }
+
+        // PHASE 5: Builders and Repairers
+        // Only spawn after harvesters, runners, upgraders, and remote workers
         // New ratios: Builders:Upgraders = 1:1, Repairers = (Builders+Upgraders)/2
         const maxBuilders = 3;
         const maxUpgraders = harvesters.length; // 1:1 with harvesters
@@ -288,36 +339,6 @@ class SpawnManager {
                     this.spawnRepairer(spawn, energyCapacity, room, creeps);
                     return;
                 }
-            }
-        }
-        
-        // PHASE 5: Remote Workers (Multi-Room Harvesting)
-        // Spawn remote harvesters for adjacent rooms
-        const neededRemoteHarvesters = room.memory.neededRemoteHarvesters || 0;
-        const neededHaulers = room.memory.neededHaulers || 0;
-        const neededClaimers = room.memory.neededClaimers || 0;
-        
-        if (neededRemoteHarvesters > 0) {
-            const bodyCost = this.getRemoteHarvesterCost(energyCapacity);
-            if (energyAvailable >= bodyCost) {
-                this.spawnRemoteHarvester(spawn, energyCapacity, room.name);
-                return;
-            }
-        }
-        
-        if (neededHaulers > 0) {
-            const bodyCost = this.getHaulerCost(energyCapacity);
-            if (energyAvailable >= bodyCost) {
-                this.spawnHauler(spawn, energyCapacity, room.name);
-                return;
-            }
-        }
-        
-        if (neededClaimers > 0) {
-            const bodyCost = this.getClaimerCost(energyCapacity);
-            if (energyAvailable >= bodyCost) {
-                this.spawnClaimer(spawn, room.name);
-                return;
             }
         }
     }

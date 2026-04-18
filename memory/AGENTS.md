@@ -52,6 +52,7 @@ The bot is built in a modular fashion with code in `src/` being compiled/bundled
 - Every task given by the user should have an OpenCode task list associated with it. You should update this task list during development.
 - Clear the OpenCode modified files list after a push to github using the github push script.
 - Ensure that there is never any console spam. The only things that should be in the console are the heartbeat, the spawning new creep message, and any errors that the bot encounters while running.
+- Only work on one phase at a time
 
 ## Provider Configuration
 Current provider: Ollama Cloud (kimi-k2.5:cloud)

@@ -4185,8 +4185,8 @@ class SpawnManager {
 
         // PHASE 3 (Stationary Mode): Spawn Runners first
         // Runners move energy from dropped locations to spawn/extensions
-        // Ratio: 1 runner per 2 harvesters
-        const desiredRunners = Math.ceil(harvesters.length / 2);
+        // Max 3 runners total
+        const desiredRunners = Math.min(3, Math.ceil(harvesters.length / 2));
         if (runners.length < desiredRunners) {
             const tier = this.getBodyTier(room, creeps, 'runner');
             const bodyCost = this.getRunnerCost(energyCapacity, tier, creeps);
@@ -4203,8 +4203,8 @@ class SpawnManager {
         }
 
         // PHASE 3 (Stationary Mode): Spawn Upgraders after Runners
-        // Calculate desired upgraders: 1 per 1 harvester (1:1 ratio), minimum 1
-        const desiredUpgraders = Math.max(1, harvesters.length);
+        // Calculate desired upgraders: 1 per 1 harvester (1:1 ratio), minimum 1, max 3
+        const desiredUpgraders = Math.min(3, Math.max(1, harvesters.length));
         if (upgraders.length < desiredUpgraders) {
             const bodyCost = this.getUpgraderCost(energyCapacity, this.getBodyTier(room, creeps, 'upgrader'), creeps);
             if (energyAvailable >= bodyCost) {
@@ -4213,8 +4213,59 @@ class SpawnManager {
             return;
         }
 
-        // PHASE 4: Builders and Repairers
-        // Only spawn after harvesters, runners, and upgraders are complete
+        // PHASE 4: Remote Workers (Multi-Room Harvesting) - Priority before builders
+        // Spawn remote harvesters for adjacent rooms
+        const neededRemoteHarvesters = room.memory.neededRemoteHarvesters || 0;
+        const neededHaulers = room.memory.neededHaulers || 0;
+        const neededClaimers = room.memory.neededClaimers || 0;
+        
+        // Remote workers have high priority for economy expansion
+        if (neededRemoteHarvesters > 0) {
+            const bodyCost = this.getRemoteHarvesterCost(energyCapacity);
+            if (usableEnergy >= bodyCost) {
+                this.spawnRemoteHarvester(spawn, energyCapacity, room.name);
+                return;
+            } else if (usableEnergy >= 200) {
+                // Can't afford full body - spawn basic remote harvester
+                const name = 'RemoteHarvester' + Game.time;
+                spawn.spawnCreep([WORK, CARRY, MOVE], name, {
+                    memory: { 
+                        role: 'remoteharvester',
+                        homeRoom: room.name
+                    }
+                });
+                return;
+            }
+        }
+        
+        if (neededHaulers > 0) {
+            const bodyCost = this.getHaulerCost(energyCapacity);
+            if (usableEnergy >= bodyCost) {
+                this.spawnHauler(spawn, energyCapacity, room.name);
+                return;
+            } else if (usableEnergy >= 200) {
+                // Can't afford full body - spawn basic hauler
+                const name = 'Hauler' + Game.time;
+                spawn.spawnCreep([CARRY, CARRY, MOVE, MOVE], name, {
+                    memory: { 
+                        role: 'hauler',
+                        homeRoom: room.name
+                    }
+                });
+                return;
+            }
+        }
+        
+        if (neededClaimers > 0) {
+            const bodyCost = this.getClaimerCost(energyCapacity);
+            if (usableEnergy >= bodyCost) {
+                this.spawnClaimer(spawn, room.name);
+                return;
+            }
+        }
+
+        // PHASE 5: Builders and Repairers
+        // Only spawn after harvesters, runners, upgraders, and remote workers
         // New ratios: Builders:Upgraders = 1:1, Repairers = (Builders+Upgraders)/2
         const maxBuilders = 3;
         const maxUpgraders = harvesters.length; // 1:1 with harvesters
@@ -4252,36 +4303,6 @@ class SpawnManager {
                     this.spawnRepairer(spawn, energyCapacity, room, creeps);
                     return;
                 }
-            }
-        }
-        
-        // PHASE 5: Remote Workers (Multi-Room Harvesting)
-        // Spawn remote harvesters for adjacent rooms
-        const neededRemoteHarvesters = room.memory.neededRemoteHarvesters || 0;
-        const neededHaulers = room.memory.neededHaulers || 0;
-        const neededClaimers = room.memory.neededClaimers || 0;
-        
-        if (neededRemoteHarvesters > 0) {
-            const bodyCost = this.getRemoteHarvesterCost(energyCapacity);
-            if (energyAvailable >= bodyCost) {
-                this.spawnRemoteHarvester(spawn, energyCapacity, room.name);
-                return;
-            }
-        }
-        
-        if (neededHaulers > 0) {
-            const bodyCost = this.getHaulerCost(energyCapacity);
-            if (energyAvailable >= bodyCost) {
-                this.spawnHauler(spawn, energyCapacity, room.name);
-                return;
-            }
-        }
-        
-        if (neededClaimers > 0) {
-            const bodyCost = this.getClaimerCost(energyCapacity);
-            if (energyAvailable >= bodyCost) {
-                this.spawnClaimer(spawn, room.name);
-                return;
             }
         }
     }
@@ -5364,8 +5385,8 @@ class RoomManager {
             return;
         }
         
-        // Scout for new rooms
-        if (Game.time % 100 === 0) {
+        // Scout for new rooms - do immediately if no remote rooms known, then every 100 ticks
+        if (room.memory.remoteRooms.length === 0 || Game.time % 100 === 0) {
             this.scoutRemoteRooms(room);
         }
         
@@ -5374,6 +5395,11 @@ class RoomManager {
         
         // Spawn remote workers if needed
         this.spawnRemoteWorkers(room);
+        
+        // Debug logging - remove after fixing
+        if (Game.time % 60 === 0) {
+            console.log(`Remote: ${room.memory.remoteRooms.length} rooms, need: RH:${room.memory.neededRemoteHarvesters} H:${room.memory.neededHaulers} C:${room.memory.neededClaimers}`);
+        }
     }
     
     scoutRemoteRooms(room) {
@@ -5504,7 +5530,7 @@ class RoomManager {
                 if (!sourceAssignment.harvester) {
                     neededRemoteHarvesters++;
                 }
-                if (!sourceAssignment.hauler && sourceAssignment.harvester) {
+                if (!sourceAssignment.hauler && sourceAssignment.harvester && neededHaulers < 3) {
                     neededHaulers++;
                 }
             }
@@ -5567,26 +5593,26 @@ class CreepManager {
 }
 
 /**
- * MOKITO PHASE MANAGEMENT SYSTEM v3
- * 
+ * MOKITO PHASE MANAGEMENT SYSTEM v4
+ *
  * Comprehensive phase determination based on:
  * - CREEP COUNTS: harvesters, runners, upgraders, builders, repairers
  * - BUILDINGS: extensions, containers, roads, ramparts, towers, storage
  * - RCL: Room Controller Level
  * - GCL: Global Control Level
  * - DEFENSES: walls, ramparts, tower count
- * 
+ *
  * Phase Criteria (MUST meet ALL for each phase):
  * Phase 0: harvesters < 2 [EMERGENCY]
  * Phase 1: harvesters >= 2
  * Phase 2: harvesters >= 2 AND upgraders >= 1
  * Phase 3: harvesters >= sourcePositions AND builders >= 1 AND extensions >= 5
  * Phase 4: Phase 3 + runners >= ceil(harvesters/2) AND stationary mode active
- * Phase 5: Phase 4 + containers >= sources.length
- * Phase 6: Phase 5 + roads >= 10
- * Phase 7: Phase 6 + ramparts >= 3 AND RCL >= 4
- * Phase 8: Phase 7 + towers >= maxTowers AND RCL >= 3
- * Phase 9: Phase 8 + storage exists AND RCL >= 4
+ * Phase 5: Phase 4 + storage exists AND RCL >= 4 [MOVED FROM PHASE 9]
+ * Phase 6: Phase 5 + containers >= sources.length
+ * Phase 7: Phase 6 + roads >= 10
+ * Phase 8: Phase 7 + ramparts >= 3 AND RCL >= 4
+ * Phase 9: Phase 8 + towers >= maxTowers AND RCL >= 3
  */
 class Mokito {
     constructor() {
@@ -5737,39 +5763,39 @@ class Mokito {
                        metrics.inStationaryMode &&
                        metrics.rcl >= 2;
                 
-            case 5: // Infrastructure - Containers
+            case 5: // Storage - Resource Buffer
                 if (!this.checkPhaseCriteria(4, metrics)) {
+                    return false;
+                }
+                return metrics.storage !== undefined &&
+                       metrics.rcl >= 4;
+                
+            case 6: // Infrastructure - Containers
+                if (!this.checkPhaseCriteria(5, metrics)) {
                     return false;
                 }
                 const sources = metrics.totalSourcePositions / 8; // Approximate
                 return metrics.containers >= Math.floor(sources);
                 
-            case 6: // Infrastructure - Roads
-                if (!this.checkPhaseCriteria(5, metrics)) {
+            case 7: // Infrastructure - Roads
+                if (!this.checkPhaseCriteria(6, metrics)) {
                     return false;
                 }
                 return metrics.roads >= 10;
                 
-            case 7: // Defense - Ramparts
-                if (!this.checkPhaseCriteria(6, metrics)) {
+            case 8: // Defense - Ramparts
+                if (!this.checkPhaseCriteria(7, metrics)) {
                     return false;
                 }
                 return metrics.ramparts >= 3 &&
                        metrics.rcl >= 4;
                 
-            case 8: // Defense - Towers
-                if (!this.checkPhaseCriteria(7, metrics)) {
+            case 9: // Defense - Towers
+                if (!this.checkPhaseCriteria(8, metrics)) {
                     return false;
                 }
                 return metrics.towers >= metrics.maxTowers &&
                        metrics.rcl >= 3;
-                
-            case 9: // Storage
-                if (!this.checkPhaseCriteria(8, metrics)) {
-                    return false;
-                }
-                return metrics.storage !== undefined &&
-                       metrics.rcl >= 4;
                 
             default:
                 return false;
@@ -5862,11 +5888,11 @@ class Mokito {
             2: 'Stabilization - Controller Progress',
             3: 'Capacity - Extensions & Full Sources',
             4: 'Efficiency - Stationary Mode',
-            5: 'Infrastructure - Containers Built',
-            6: 'Infrastructure - Road Network',
-            7: 'Defense - Ramparts Active',
-            8: 'Defense - Towers Online',
-            9: 'Storage - Resource Buffer'
+            5: 'Storage - Resource Buffer',
+            6: 'Infrastructure - Containers Built',
+            7: 'Infrastructure - Road Network',
+            8: 'Defense - Ramparts Active',
+            9: 'Defense - Towers Online'
         };
         return names[phase] || 'Unknown Phase';
     }

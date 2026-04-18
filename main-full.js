@@ -3986,13 +3986,24 @@ class SpawnManager {
             return;
         }
 
-        // Check if we should wait for full energy to maximize body parts
-        // BUT: Never wait in Phase 1-2, or if critical need
+        // Energy budget check - use getMaxBudget to determine if we can spawn
+        // Emergency: < 3 creeps - spawn immediately if we have 200+ energy
+        // Otherwise, only use 65% of energy capacity for spawning
+        const maxSpawnBudget = this.getMaxBudget(energyCapacity, creeps);
+        
+        // Check if we're in critical need (no runners in stationary mode)
         const criticalNeedRunner = inStationaryMode && runners.length < 1 && harvesters.length >= 2;
         const earlyPhase = isPhase1 || isPhase2;
         
-        if (!energyFull && harvesters.length >= 2 && room.controller.level >= 2 && !criticalNeedRunner && !earlyPhase) {
-            // Wait for full energy unless it's early game or critical need
+        // Determine minimum energy needed to spawn
+        let minEnergyNeeded = 200; // Basic creep minimum
+        if (!earlyPhase && !criticalNeedRunner && creeps.length >= 7) {
+            // In normal phase with enough creeps, wait until we can afford decent body
+            // But don't wait for FULL energy
+            minEnergyNeeded = Math.min(maxSpawnBudget, 500); // At least 500 for decent body
+        }
+        
+        if (energyAvailable < minEnergyNeeded) {
             room.memory.waitingForEnergy = true;
             return;
         }
@@ -4009,10 +4020,14 @@ class SpawnManager {
             return;
         }
 
-        // PHASE 2: Fill all harvester positions
+        // PHASE 2+: Fill all harvester positions
         // Keep spawning harvesters until all source positions are filled
         if (harvesters.length < totalSourcePositions) {
-            if (energyAvailable >= this.getHarvesterCost(energyCapacity, this.getBodyTier(room, creeps, 'harvester'), creeps)) {
+            const tier = this.getBodyTier(room, creeps, 'harvester');
+            const cost = this.getHarvesterCost(energyCapacity, tier, creeps);
+            
+            // Check if we have enough energy for the desired body
+            if (energyAvailable >= cost) {
                 // Assign to source with fewest harvesters
                 let bestSource = sources[0];
                 let minHarvesters = Infinity;
@@ -4026,6 +4041,28 @@ class SpawnManager {
                 }
                 
                 this.spawnHarvester(spawn, bestSource, energyCapacity, room, creeps);
+            } else if (energyAvailable >= 200) {
+                // Can't afford full body but can afford basic - spawn basic
+                let bestSource = sources[0];
+                let minHarvesters = Infinity;
+                
+                for (const source of sources) {
+                    const harvestersAtSource = harvesters.filter(h => h.memory.sourceId === source.id).length;
+                    if (harvestersAtSource < minHarvesters) {
+                        minHarvesters = harvestersAtSource;
+                        bestSource = source;
+                    }
+                }
+                
+                // Spawn basic harvester with minimal body
+                const name = 'Harvester' + Game.time;
+                spawn.spawnCreep([WORK, CARRY, MOVE], name, {
+                    memory: { 
+                        role: 'harvester', 
+                        sourceId: bestSource.id,
+                        delivering: false
+                    }
+                });
             }
             return;
         }
@@ -4044,9 +4081,16 @@ class SpawnManager {
         // Ratio: 1 runner per 2 harvesters
         const desiredRunners = Math.ceil(harvesters.length / 2);
         if (runners.length < desiredRunners) {
-            const bodyCost = this.getRunnerCost(energyCapacity, this.getBodyTier(room, creeps, 'runner'), creeps);
+            const tier = this.getBodyTier(room, creeps, 'runner');
+            const bodyCost = this.getRunnerCost(energyCapacity, tier, creeps);
             if (energyAvailable >= bodyCost) {
                 this.spawnRunner(spawn, energyCapacity, room, creeps);
+            } else if (energyAvailable >= 200) {
+                // Can't afford full body - spawn basic runner
+                const name = 'Runner' + Game.time;
+                spawn.spawnCreep([CARRY, CARRY, MOVE, MOVE], name, {
+                    memory: { role: 'runner' }
+                });
             }
             return;
         }

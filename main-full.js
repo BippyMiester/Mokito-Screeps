@@ -638,15 +638,45 @@ class Runner {
             return;
         }
         
-        // No energy to collect and no energy stored - return to spawn area
-        // Don't wait idle in the middle of nowhere
+        // No energy to collect and no energy stored - help with construction or upgrading
+        // Don't just wait idle, find something useful to do
+        
+        // Try to find construction sites to help build
+        const constructionSite = creep.pos.findClosestByPath(FIND_CONSTRUCTION_SITES);
+        if (constructionSite && creep.store[RESOURCE_ENERGY] > 0) {
+            if (creep.build(constructionSite) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(constructionSite, { visualizePathStyle: { stroke: '#ffaa00' } });
+            }
+            creep.say('🔨 help');
+            return;
+        }
+        
+        // Help repair roads if damaged
+        const damagedRoad = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_ROAD && s.hits < s.hitsMax * 0.5
+        });
+        if (damagedRoad && creep.store[RESOURCE_ENERGY] > 0) {
+            if (creep.repair(damagedRoad) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(damagedRoad, { visualizePathStyle: { stroke: '#ffaa00' } });
+            }
+            creep.say('🔧 repair');
+            return;
+        }
+        
+        // Return to spawn area but don't get stuck
         const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
-        if (spawn) {
+        if (spawn && !creep.pos.inRangeTo(spawn, 5)) {
             creep.moveTo(spawn, {
                 range: 3,
                 visualizePathStyle: { stroke: '#ffaa00' }
             });
             creep.say('🏠 return');
+        } else if (spawn) {
+            // Near spawn, help upgrade controller
+            this.upgradeController(creep);
+        } else {
+            // No spawn? Help upgrade anyway
+            this.upgradeController(creep);
         }
     }
 

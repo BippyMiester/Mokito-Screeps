@@ -149,7 +149,16 @@ class Repairer {
     }
 
     repair(creep) {
-        // Priority 1: Containers (critical for energy flow)
+        // Priority 1: Build construction sites
+        const constructionSite = creep.pos.findClosestByPath(FIND_CONSTRUCTION_SITES);
+        if (constructionSite) {
+            if (creep.build(constructionSite) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(constructionSite);
+            }
+            return;
+        }
+
+        // Priority 2: Containers (critical for energy flow)
         const container = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_CONTAINER &&
                         s.hits < s.hitsMax * 0.8
@@ -162,7 +171,7 @@ class Repairer {
             return;
         }
 
-        // Priority 2: Roads
+        // Priority 3: Roads
         const road = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_ROAD &&
                         s.hits < s.hitsMax * 0.5
@@ -175,7 +184,7 @@ class Repairer {
             return;
         }
 
-        // Priority 3: Ramparts (maintain at safe level)
+        // Priority 4: Ramparts (maintain at safe level)
         const rampart = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_RAMPART &&
                         s.hits < 1000000 // 1M hits minimum
@@ -188,7 +197,7 @@ class Repairer {
             return;
         }
 
-        // Priority 4: Walls
+        // Priority 5: Walls
         const wall = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_WALL &&
                         s.hits < 1000000

@@ -14,38 +14,45 @@ An advanced AI bot for [Screeps](https://screeps.com/), the world's first persis
 | 1 | ✅ **COMPLETE** | Foundation - Harvester, Runner, basic spawning | 100% |
 | 2 | ✅ **COMPLETE** | Stabilization - Upgrader, Builder roles | 100% |
 | 3 | ✅ **COMPLETE** | Capacity - Extension construction | 100% |
-| 4 | ⏳ **NEXT** | Efficiency - Stationary harvesting, containers | 0% |
-| 5-8 | ⏳ PENDING | Infrastructure & Defense - Roads, ramparts, towers | 0% |
-| 9+ | ⏳ PENDING | Expansion, Military, Endgame | 0% |
+| 4 | ✅ **COMPLETE** | Efficiency - Stationary harvesting, containers | 100% |
+| 5 | ✅ **COMPLETE** | Road Networks - Automated path construction | 100% |
+| 6 | ✅ **COMPLETE** | Defense Foundations - Ramparts, basic defense | 100% |
+| 7 | ✅ **COMPLETE** | Towers - Tower construction and AI | 100% |
+| 8 | ✅ **COMPLETE** | Storage System - Storage construction | 100% |
+| 9 | ✅ **COMPLETE** | Remote Mining - RemoteHarvester, Hauler, Claimer | 100% |
+| 10-20 | ⏳ PENDING | Military, Market, Nuclear, Endgame | 0% |
 
-**Current Focus:** Phases 0-3 are **100% complete** and ready for deployment! 🎉
+**Current Focus:** Phases 0-9 are **100% complete** with comprehensive economy and defense! 🎉
 
 **Bot Statistics:**
-- Size: 177.98 KB
+- Size: 209 KB
 - 20 modules
 - 12 creep roles implemented
-- Last updated: 2026-04-09
+- 35% energy reserve for emergencies
+- Phase-based spawning with grace periods
+- Last updated: 2026-04-18
 
 ---
 
 ## 🎮 Features
 
-### Implemented (Phases 0-3) ✅
+### Implemented (Phases 0-9) ✅
 - **Emergency Recovery**: Automatic spawning when harvesters < 2
-- **Phase-Based Spawning**: Priority system from early to late game
-- **Multi-Role Creeps**: Harvester, Runner, Upgrader, Builder, Repairer
-- **Smart Energy Distribution**: Automatic transport from drops to spawn
-- **Extension Construction**: Automated diamond-pattern placement
-- **Console Management**: Minimal spam, heartbeat every 60 ticks
+- **Phase-Based Spawning**: Dynamic priority system with phase persistence and grace periods
+- **Multi-Role Creeps**: Harvester, Runner, Upgrader, Builder, Repairer, RemoteHarvester, Hauler, Claimer, Defender
+- **Smart Energy Distribution**: 35% energy reserve maintained for emergencies
+- **Extension Construction**: Automated placement
+- **Stationary Harvesting**: Container-based mining with automatic mode switching
+- **Road Networks**: Automated path construction from spawn to sources and controller
+- **Defense System**: Ramparts around critical structures, tower AI, defender creeps
+- **Storage System**: Energy buffer for burst spending
+- **Remote Mining**: Multi-room harvesting with haulers
+- **Console Management**: Minimal spam - only heartbeats, spawn messages, and errors
 - **Memory Persistence**: Session history and development logs
 
-### Planned (Phases 4-20)
-- **Stationary Harvesting**: Container-based energy extraction
-- **Road Networks**: Automated path construction
-- **Defense System**: Ramparts, towers, defender creeps
+### Planned (Phases 10-20)
 - **Military Operations**: Attack squads, healing coordination
 - **Scout Network**: Intelligence gathering
-- **Remote Mining**: Multi-room expansion
 - **Market Trading**: Resource arbitrage
 - **Power Processing**: NPC strongholds
 - **Nuclear Capabilities**: Endgame destruction
@@ -120,21 +127,32 @@ While fully autonomous, you can:
 
 ## 👷 Creep Roles
 
-| Role | Emoji | Purpose | Energy Source |
-|------|-------|---------|---------------|
-| **Harvester** | 🌱 | Mines energy from sources | Self-mining (drops on ground in stationary mode) |
-| **Runner** | 🏃 | Transports energy from drops to spawn | Picks up dropped energy |
-| **Upgrader** | ⚡ | Upgrades room controller | Picks up dropped energy or self-mines |
-| **Builder** | 🔨 | Builds construction sites | Picks up dropped energy or self-mines |
-| **Repairer** | 🔧 | Repairs roads, containers, walls | Picks up dropped energy or self-mines |
+| Role | Emoji | Purpose | Status |
+|------|-------|---------|--------|
+| **Harvester** | 🌱 | Mines energy from sources | ✅ Phase 1 |
+| **Runner** | 🏃 | Transports energy from drops to spawn | ✅ Phase 1 |
+| **Upgrader** | ⚡ | Upgrades room controller | ✅ Phase 2 |
+| **Builder** | 🔨 | Builds construction sites | ✅ Phase 2 |
+| **Repairer** | 🔧 | Repairs roads, containers, walls | ✅ Phase 2 |
+| **RemoteHarvester** | 🌍 | Mines energy in adjacent rooms | ✅ Phase 6 |
+| **Hauler** | 🚚 | Long-distance energy transport | ✅ Phase 6 |
+| **Claimer** | 🏳️ | Room reservation and claiming | ✅ Phase 9 |
+| **Defender** | 🛡️ | Room defense and attack response | ✅ Phase 7 |
+| **Attacker** | ⚔️ | Military offensive operations | ⏳ Phase 12 |
+| **Healer** | 💚 | Squad healing and support | ⏳ Phase 12 |
+| **Scout** | 🔍 | Intelligence gathering | ⏳ Phase 11 |
 
 ### Role Behaviors
 
-- **Harvesters**: In stationary mode, stand by sources and drop energy. In traditional mode, deliver to spawn.
-- **Runners**: Collect dropped energy and deliver to spawn → extensions → towers.
-- **Upgraders**: Self-sufficient upgraders that mine their own energy or collect from drops.
-- **Builders**: Collect dropped energy, build structures, or help repair when idle.
-- **Repairers**: Maintain roads, containers, ramparts, and walls.
+- **Harvester**: Dual-mode system (traditional delivery or stationary drop), automatic mode switching
+- **Runner**: Collect dropped energy and deliver to spawn → extensions → towers → storage
+- **Upgrader**: Self-sufficient upgraders that mine their own energy or collect from drops
+- **Builder**: Collect dropped energy, build structures, or help repair when idle
+- **Repairer**: Maintain roads, containers, ramparts, and walls
+- **RemoteHarvester**: Travel to adjacent rooms, build containers, mine sources
+- **Hauler**: Collect from remote containers, deliver to home room storage
+- **Claimer**: Reserve or claim controller in adjacent rooms
+- **Defender**: Attack hostile creeps, protect room from invaders
 
 ## 📊 Spawning Strategy
 
@@ -153,8 +171,16 @@ Mokito follows a strict spawning priority system:
 6. Spawn **Upgraders** (1:1 ratio with harvesters)
 
 ### Phase 4: Base Development
-7. Spawn **Builders** first (max 3, requires construction sites)
-8. Spawn **Repairers** after builders (2 per 1 builder, max 4)
+7. Spawn **Builders** (max 3, requires construction sites)
+8. Spawn **Repairers** (2 per 1 builder, max 4)
+
+### Phase 5-9: Advanced Infrastructure
+9. Build **Containers** at sources for stationary harvesting
+10. Build **Roads** (10+ minimum) for movement efficiency
+11. Build **Ramparts** for defense (3+ around critical structures)
+12. Build **Towers** (max allowed by RCL) with automated defense AI
+13. Build **Storage** for resource buffering
+14. Spawn **Remote Workers** (RemoteHarvester, Hauler, Claimer) for multi-room expansion
 
 ### Emergency Protocol
 - If harvesters drop below 2, **immediately** rebuild harvesters

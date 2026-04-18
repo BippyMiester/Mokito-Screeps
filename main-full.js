@@ -3821,6 +3821,9 @@ class ConstructionManager {
     
     buildRamparts(room) {
         // Phase 6: Build ramparts at room entrances to defend against invaders
+        // Requires RCL 4+
+        if (room.controller.level < 4) return;
+        
         // Strategy: Build ramparts 2 tiles from exits in a line until hitting walls
         // This forces enemies to walk through a chokepoint protected by ramparts
         
@@ -5251,7 +5254,7 @@ class Mokito {
             case 4:
                 return ['10+ roads (for Phase 5)'];
             case 5:
-                return ['Ramparts at exits (for Phase 6)'];
+                return ['RCL 4+ required for ramparts'];
             case 6:
                 return ['Phase 6 complete!'];
             default:

@@ -286,7 +286,7 @@ class Mokito {
             case 4:
                 return ['10+ roads (for Phase 5)'];
             case 5:
-                return ['Ramparts at exits (for Phase 6)'];
+                return ['RCL 4+ required for ramparts'];
             case 6:
                 return ['Phase 6 complete!'];
             default:

@@ -409,6 +409,9 @@ class ConstructionManager {
     
     buildRamparts(room) {
         // Phase 6: Build ramparts at room entrances to defend against invaders
+        // Requires RCL 4+
+        if (room.controller.level < 4) return;
+        
         // Strategy: Build ramparts 2 tiles from exits in a line until hitting walls
         // This forces enemies to walk through a chokepoint protected by ramparts
         

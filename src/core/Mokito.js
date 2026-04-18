@@ -40,12 +40,34 @@ class Mokito {
         
         // Heartbeat every 60 ticks
         if (Game.time % 60 === 0) {
-            const roomName = Object.keys(Game.rooms)[0];
-            const room = Game.rooms[roomName];
-            if (room && room.controller) {
-                const metrics = this.gatherRoomMetrics(room);
-                const phase = this.getCurrentPhase(room, metrics);
-                this.logHeartbeat(room, metrics, phase);
+            // Find the home room (owned room with controller and spawn)
+            let homeRoom = null;
+            for (const roomName in Game.rooms) {
+                const room = Game.rooms[roomName];
+                if (room && room.controller && room.controller.my) {
+                    const spawns = room.find(FIND_MY_SPAWNS);
+                    if (spawns.length > 0) {
+                        homeRoom = room;
+                        break;
+                    }
+                }
+            }
+            
+            // Fallback: use any owned room
+            if (!homeRoom) {
+                for (const roomName in Game.rooms) {
+                    const room = Game.rooms[roomName];
+                    if (room && room.controller && room.controller.my) {
+                        homeRoom = room;
+                        break;
+                    }
+                }
+            }
+            
+            if (homeRoom) {
+                const metrics = this.gatherRoomMetrics(homeRoom);
+                const phase = this.getCurrentPhase(homeRoom, metrics);
+                this.logHeartbeat(homeRoom, metrics, phase);
             }
         }
     }

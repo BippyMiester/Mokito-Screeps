@@ -4031,24 +4031,17 @@ class ConstructionManager {
 }
 
 /**
- * SpawnManager - Manages creep spawning with priority system
- * 
- * SPAWN PRIORITY ORDER (highest to lowest):
- * 1. EMERGENCY: Harvesters (if < 2)
- * 2. CRITICAL: Runners (if stationary mode and none exist)
- * 3. ESSENTIAL: Harvesters up to minimum needed
- * 4. CORE: Runners, Upgraders (1:1 with harvesters)
- * 5. MAINTENANCE: Builders, Repairers
- * 6. EXPANSION: Remote Harvesters, Haulers, Claimers
- * 
- * SMART REPLACEMENT:
- * - Track dying creeps and pre-spawn replacements
- * - Use smaller bodies when creep counts are low (faster spawn)
- * - Never wait for full energy if critical roles are missing
- * 
- * PHASE-AGNOSTIC SPAWNING:
- * - Spawning continues based on actual needs, not phase
- * - Phase is for tracking, not for blocking
+ * SpawnManager - Manages creep spawning with NEW phase-based priority system
+ *
+ * NEW PHASE STRUCTURE (2026-04-18):
+ * Phase 1: Harvesters = open_spaces / 2
+ * Phase 2: Upgraders = 3
+ * Phase 3: Builders = 3 + Extensions
+ * Phase 4: Runners = 3, Repairers = 2 (first runner triggers stationary)
+ * Phase 5: Roads (10+)
+ * Phase 6: Ramparts at exits
+ *
+ * ENERGY RESERVE: Always maintain 35% energy reserve
  */
 class SpawnManager {
     run(room) {
@@ -4058,7 +4051,6 @@ class SpawnManager {
 
         const energyAvailable = room.energyAvailable;
         const energyCapacity = room.energyCapacityAvailable;
-        const energyFull = energyAvailable >= energyCapacity;
 
         // Count existing creeps
         const creeps = room.find(FIND_MY_CREEPS);
@@ -4068,1005 +4060,238 @@ class SpawnManager {
         const repairers = creeps.filter(c => c.memory.role === 'repairer');
         const runners = creeps.filter(c => c.memory.role === 'runner');
 
-        // Calculate needed harvesters (open positions around sources)
+        // Calculate source positions
         const sources = room.find(FIND_SOURCES);
         let totalSourcePositions = 0;
         for (const source of sources) {
             totalSourcePositions += this.countOpenPositions(source);
         }
-        
-        // Update spawn priority info in room memory for heartbeat display
-        const nextSpawns = this.getNextSpawnPriority(room);
+
+        // Update spawn priority info
+        const nextSpawns = this.getNextSpawnPriority(room, harvesters.length, upgraders.length, builders.length, repairers.length, runners.length, totalSourcePositions);
         room.memory.spawnPriority = nextSpawns;
-        
-        // Store energy status for other logic
-        room.memory.energyFull = energyFull;
-        
-        // DETERMINE CURRENT PHASE for spawning logic
-        // Phase 1: <2 harvesters OR (2 harvesters but <1 runner)
-        // Phase 2: 2+ harvesters, 1+ runner, but <1 upgrader
-        // Phase 3+: Normal operation
-        const inStationaryMode = room.memory.harvesterMode === 'stationary' || room.memory.stationaryMode;
-        const isPhase1 = harvesters.length < 2 || (harvesters.length >= 2 && runners.length < 1 && !inStationaryMode);
-        const isPhase2 = harvesters.length >= 2 && runners.length >= 1 && upgraders.length < 1 && !inStationaryMode;
-        
-        // EMERGENCY MODE: Less than 2 harvesters
-        // This is critical - we need energy production immediately
-        if (harvesters.length < 2) {
-            // Force traditional mode for all harvesters
-            room.memory.stationaryMode = false;
-            room.memory.harvesterMode = 'traditional';
-            
-            // Spawn basic harvester ASAP
-            if (energyAvailable >= 200) {
-                const name = 'Harvester' + Game.time;
-                const source = sources[0];
-                if (source) {
-                    spawn.spawnCreep([WORK, CARRY, MOVE], name, {
-                        memory: { 
-                            role: 'harvester', 
-                            sourceId: source.id,
-                            delivering: false
-                        }
-                    });
-                }
-                room.memory.waitingForEnergy = false;
-            } else {
-                room.memory.waitingForEnergy = true;
-            }
-            return;
-        }
 
-        // CRITICAL: Stationary mode with no runners = DEADLOCK
-        // Harvesters drop energy but nothing picks it up
-        // This takes priority over everything except emergency harvesters
-        if (inStationaryMode && runners.length < 1) {
-            // Temporarily switch back to traditional mode until we have runners
-            console.log('⚠️  STATIONARY DEADLOCK: No runners! Switching to traditional mode');
-            room.memory.harvesterMode = 'traditional';
-            room.memory.stationaryMode = false;
-            
-            // Spawn a runner immediately with whatever we have
-            if (energyAvailable >= 200) {
-                const name = 'Runner' + Game.time;
-                spawn.spawnCreep([CARRY, CARRY, MOVE, MOVE], name, {
-                    memory: { role: 'runner' }
-                });
-                console.log('🏃 Emergency runner spawned');
-                room.memory.waitingForEnergy = false;
-            } else {
-                room.memory.waitingForEnergy = true;
-            }
-            return;
-        }
+        // Energy budget: Maintain 35% reserve
+        const minReserve = Math.floor(energyCapacity * 0.35);
+        const usableEnergy = energyAvailable - minReserve;
 
-        // PHASE 1 CONTINUED: We have 2+ harvesters in traditional mode, now need runner
-        if (isPhase1 && runners.length < 1) {
-            if (energyAvailable >= 200) {
-                const name = 'Runner' + Game.time;
-                spawn.spawnCreep([CARRY, CARRY, MOVE, MOVE], name, {
-                    memory: { role: 'runner' }
-                });
-                room.memory.waitingForEnergy = false;
-            } else {
-                room.memory.waitingForEnergy = true;
-            }
-            return;
-        }
-
-        // Energy budget check - use getMaxBudget to determine if we can spawn
-        // CRITICAL: Never go below 35% energy reserve for emergencies
-        // Emergency: < 3 creeps - spawn immediately if we have 200+ energy
-        // Otherwise, only use 65% of energy capacity for spawning
-        const minReserve = Math.floor(energyCapacity * 0.35); // 35% minimum reserve
-        const maxSpawnBudget = this.getMaxBudget(energyCapacity, creeps);
-        const usableEnergy = energyAvailable - minReserve; // Energy we can actually spend
-        
-        // Check if we're in critical need (no runners in stationary mode)
-        const criticalNeedRunner = inStationaryMode && runners.length < 1 && harvesters.length >= 2;
-        const earlyPhase = isPhase1 || isPhase2;
-        
-        // Determine minimum energy needed to spawn
-        let minEnergyNeeded = 200; // Basic creep minimum
-        if (!earlyPhase && !criticalNeedRunner && creeps.length >= 7) {
-            // In normal phase with enough creeps, wait until we can afford decent body
-            // But don't wait for FULL energy
-            minEnergyNeeded = Math.min(maxSpawnBudget, 500); // At least 500 for decent body
-        }
-        
-        // Check if we have enough USABLE energy (above 35% reserve)
-        if (usableEnergy < minEnergyNeeded) {
-            // We have energy but can't spend it without dropping below 35% reserve
+        if (usableEnergy < 200) {
             room.memory.waitingForEnergy = true;
             return;
         }
-        
         room.memory.waitingForEnergy = false;
 
-        // PHASE 2: Initial startup - have 2 harvesters and 1 runner, now need upgrader
-        if (isPhase2) {
-            // Spawn upgrader with minimal body
-            // Body: WORK, CARRY, MOVE = 200 energy
-            if (usableEnergy >= 200) {
-                this.spawnUpgrader(spawn, energyCapacity, room, creeps);
-            }
+        // === PHASE 1: HARVESTERS ===
+        // Required: open_spaces / 2 (rounded down)
+        const requiredHarvesters = Math.floor(totalSourcePositions / 2);
+        if (harvesters.length < requiredHarvesters) {
+            this.spawnHarvester(spawn, sources, room, creeps);
             return;
         }
 
-        // PHASE 2+: Fill harvester positions - only need open spaces / 2
-        // Balanced: Fewer harvesters, each takes more spots around source
-        const maxHarvesters = Math.floor(totalSourcePositions / 2);
-        if (harvesters.length < maxHarvesters && harvesters.length < sources.length * 2) {
-            const tier = this.getBodyTier(room, creeps, 'harvester');
-            const cost = this.getHarvesterCost(energyCapacity, tier, creeps);
-            
-            // Check if we have enough USABLE energy for the desired body
-            if (usableEnergy >= cost) {
-                // Assign to source with fewest harvesters
-                let bestSource = sources[0];
-                let minHarvesters = Infinity;
-                
-                for (const source of sources) {
-                    const harvestersAtSource = harvesters.filter(h => h.memory.sourceId === source.id).length;
-                    if (harvestersAtSource < minHarvesters) {
-                        minHarvesters = harvestersAtSource;
-                        bestSource = source;
-                    }
-                }
-                
-                this.spawnHarvester(spawn, bestSource, energyCapacity, room, creeps);
-            } else if (usableEnergy >= 200) {
-                // Can't afford full body but can afford basic - spawn basic
-                let bestSource = sources[0];
-                let minHarvesters = Infinity;
-                
-                for (const source of sources) {
-                    const harvestersAtSource = harvesters.filter(h => h.memory.sourceId === source.id).length;
-                    if (harvestersAtSource < minHarvesters) {
-                        minHarvesters = harvestersAtSource;
-                        bestSource = source;
-                    }
-                }
-                
-                // Spawn basic harvester with minimal body
-                const name = 'Harvester' + Game.time;
-                spawn.spawnCreep([WORK, CARRY, MOVE], name, {
-                    memory: { 
-                        role: 'harvester', 
-                        sourceId: bestSource.id,
-                        delivering: false
-                    }
-                });
-            }
+        // === PHASE 2: UPGRADERS ===
+        // Required: 3 upgraders
+        if (upgraders.length < 3) {
+            this.spawnUpgrader(spawn, energyCapacity, room, creeps);
             return;
         }
 
-        // Check if we should switch to stationary mode
-        // This happens when we have enough harvesters to cover all source positions
-        if (harvesters.length >= totalSourcePositions) {
-            if (!room.memory.stationaryMode) {
-                // Room switching to stationary mode (logged in heartbeat)
+        // === PHASE 3: BUILDERS ===
+        // Required: 3 builders
+        if (builders.length < 3) {
+            this.spawnBuilder(spawn, energyCapacity, room, creeps);
+            return;
+        }
+
+        // === PHASE 4: RUNNERS + REPAIRERS ===
+        // Required: 3 runners, 2 repairers
+        // First runner triggers stationary mode
+
+        if (runners.length < 3) {
+            // First runner triggers stationary harvesting
+            if (runners.length === 0 && !room.memory.stationaryMode) {
                 room.memory.stationaryMode = true;
+                room.memory.harvesterMode = 'stationary';
             }
-        }
-
-        // PHASE 3 (Stationary Mode): Spawn Runners first
-        // Runners move energy from dropped locations to spawn/extensions
-        // Max 3 runners total
-        const desiredRunners = Math.min(3, Math.ceil(harvesters.length / 2));
-        if (runners.length < desiredRunners) {
-            const tier = this.getBodyTier(room, creeps, 'runner');
-            const bodyCost = this.getRunnerCost(energyCapacity, tier, creeps);
-            if (energyAvailable >= bodyCost) {
-                this.spawnRunner(spawn, energyCapacity, room, creeps);
-            } else if (energyAvailable >= 200) {
-                // Can't afford full body - spawn basic runner
-                const name = 'Runner' + Game.time;
-                spawn.spawnCreep([CARRY, CARRY, MOVE, MOVE], name, {
-                    memory: { role: 'runner' }
-                });
-            }
+            this.spawnRunner(spawn, energyCapacity, room, creeps);
             return;
         }
 
-        // PHASE 3 (Stationary Mode): Spawn Upgraders after Runners
-        // Calculate desired upgraders: 1 per 1 harvester (1:1 ratio), minimum 1, max 3
-        const desiredUpgraders = Math.min(3, Math.max(1, harvesters.length));
-        if (upgraders.length < desiredUpgraders) {
-            const bodyCost = this.getUpgraderCost(energyCapacity, this.getBodyTier(room, creeps, 'upgrader'), creeps);
-            if (energyAvailable >= bodyCost) {
-                this.spawnUpgrader(spawn, energyCapacity, room, creeps);
-            }
+        if (repairers.length < 2) {
+            this.spawnRepairer(spawn, energyCapacity, room, creeps);
             return;
         }
 
-        // PHASE 4: Remote Workers (Multi-Room Harvesting) - Priority before builders
-        // Spawn remote harvesters for adjacent rooms
-        const neededRemoteHarvesters = room.memory.neededRemoteHarvesters || 0;
-        const neededHaulers = room.memory.neededHaulers || 0;
-        const neededClaimers = room.memory.neededClaimers || 0;
-        
-        // Remote workers have high priority for economy expansion
-        if (neededRemoteHarvesters > 0) {
-            const bodyCost = this.getRemoteHarvesterCost(energyCapacity);
-            if (usableEnergy >= bodyCost) {
-                this.spawnRemoteHarvester(spawn, energyCapacity, room.name);
-                return;
-            } else if (usableEnergy >= 200) {
-                // Can't afford full body - spawn basic remote harvester
-                const name = 'RemoteHarvester' + Game.time;
-                spawn.spawnCreep([WORK, CARRY, MOVE], name, {
-                    memory: { 
-                        role: 'remoteharvester',
-                        homeRoom: room.name
-                    }
-                });
-                return;
-            }
-        }
-        
-        if (neededHaulers > 0) {
-            const bodyCost = this.getHaulerCost(energyCapacity);
-            if (usableEnergy >= bodyCost) {
-                this.spawnHauler(spawn, energyCapacity, room.name);
-                return;
-            } else if (usableEnergy >= 200) {
-                // Can't afford full body - spawn basic hauler
-                const name = 'Hauler' + Game.time;
-                spawn.spawnCreep([CARRY, CARRY, MOVE, MOVE], name, {
-                    memory: { 
-                        role: 'hauler',
-                        homeRoom: room.name
-                    }
-                });
-                return;
-            }
-        }
-        
-        if (neededClaimers > 0) {
-            const bodyCost = this.getClaimerCost(energyCapacity);
-            if (usableEnergy >= bodyCost) {
-                this.spawnClaimer(spawn, room.name);
-                return;
-            }
-        }
-
-        // PHASE 5: Builders and Repairers
-        // Only spawn after harvesters, runners, upgraders, and remote workers
-        // New ratios: Builders:Upgraders = 1:1, Repairers = (Builders+Upgraders)/2
-        const maxBuilders = 3;
-        const maxUpgraders = harvesters.length; // 1:1 with harvesters
-        
-        // Check for construction sites
-        const sites = room.find(FIND_CONSTRUCTION_SITES);
-        
-        // Calculate desired builders (1:1 with upgraders, up to max)
-        const desiredBuilders = Math.min(upgraders.length, maxBuilders);
-        
-        // Spawn builder first (priority before repairers)
-        // Maintain 1:1 ratio with upgraders
-        // Spawn builders if: we have sites to work on, OR we need at least 1 builder for future work
-        const minBuilders = sites.length > 0 ? 1 : 0; // At least 1 builder when there's work
-        const actualDesiredBuilders = Math.max(minBuilders, Math.min(desiredBuilders, sites.length > 0 ? maxBuilders : 1));
-        
-        if (builders.length < actualDesiredBuilders) {
-            const bodyCost = this.getBuilderCost(energyCapacity, this.getBodyTier(room, creeps, 'builder'), creeps);
-            if (energyAvailable >= bodyCost) {
-                this.spawnBuilder(spawn, energyCapacity, room, creeps);
-                return;
-            }
-        }
-        
-        // Spawn repairers based on (builders + upgraders) / 2 formula
-        // This ensures repairers scale with our building/upgrading workforce
-        const desiredRepairers = Math.ceil((builders.length + upgraders.length) / 2);
-        const maxRepairers = 4;
-        
-        if (repairers.length < desiredRepairers && repairers.length < maxRepairers) {
-            const needsRepair = this.needsRepair(room);
-            if (needsRepair || repairers.length === 0) {
-                const bodyCost = this.getRepairerCost(energyCapacity, this.getBodyTier(room, creeps, 'repairer'), creeps);
-                if (energyAvailable >= bodyCost) {
-                    this.spawnRepairer(spawn, energyCapacity, room, creeps);
-                    return;
-                }
-            }
-        }
+        // Phases 5-6 are handled by ConstructionManager (roads, ramparts)
+        // No additional creeps needed beyond Phase 4
     }
-    
+
     /**
-     * Count open positions around a source (where a creep can stand to harvest)
+     * Count open positions around a source
      */
     countOpenPositions(source) {
         const room = source.room;
         const terrain = room.getTerrain();
         let count = 0;
-        
+
         for (let dx = -1; dx <= 1; dx++) {
             for (let dy = -1; dy <= 1; dy++) {
                 if (dx === 0 && dy === 0) continue;
-                
                 const x = source.pos.x + dx;
                 const y = source.pos.y + dy;
-                
-                if (x < 0 || x > 49 || y < 0 || y > 49) continue;
-                if (terrain.get(x, y) !== TERRAIN_MASK_WALL) {
-                    count++;
+                if (x >= 0 && x <= 49 && y >= 0 && y <= 49) {
+                    if (terrain.get(x, y) !== TERRAIN_MASK_WALL) {
+                        count++;
+                    }
                 }
             }
         }
-        
         return count;
     }
 
     /**
-     * Check if any structures need repair
+     * Get spawn priority for heartbeat display
      */
-    needsRepair(room) {
-        const damaged = room.find(FIND_STRUCTURES, {
-            filter: s => {
-                if (s.structureType === STRUCTURE_ROAD && s.hits < s.hitsMax * 0.5) return true;
-                if (s.structureType === STRUCTURE_CONTAINER && s.hits < s.hitsMax * 0.8) return true;
-                if (s.structureType === STRUCTURE_RAMPART && s.hits < 1000000) return true;
-                if (s.structureType === STRUCTURE_WALL && s.hits < 1000000) return true;
-                return false;
-            }
-        });
-        return damaged.length > 0;
-    }
-
-    /**
-     * SMART BODY SCALING SYSTEM
-     * 
-     * Principles:
-     * 1. Early game (few creeps): Smaller, cheaper bodies to spawn quickly
-     * 2. Mid game (established economy): Medium bodies for efficiency
-     * 3. Late game (full capacity): Large bodies for maximum throughput
-     * 
-     * Scaling Factors:
-     * - Total creeps in room (more creeps = larger bodies)
-     * - Current phase (higher phase = larger bodies)
-     * - Available energy capacity (RCL level)
-     * - Emergency situations (always small bodies)
-     */
-
-    /**
-     * Calculate body tier based on room state
-     * Returns 1-4 indicating body size tier
-     */
-    getBodyTier(room, creeps, role) {
-        const totalCreeps = creeps.length;
-        const rcl = room.controller.level;
-        const roomMem = Memory.rooms[room.name] || {};
-        const inStationaryMode = roomMem.harvesterMode === 'stationary';
-        
-        // EMERGENCY: Less than 3 creeps total - use minimal bodies
-        if (totalCreeps < 3) {
-            return 1; // Minimal body
-        }
-        
-        // EARLY GAME: 3-6 creeps - use small efficient bodies
-        if (totalCreeps < 7) {
-            return 2; // Small body
-        }
-        
-        // MID GAME: Established but not maxed - medium bodies
-        if (totalCreeps < 12) {
-            return 3; // Medium body
-        }
-        
-        // LATE GAME: Many creeps - large bodies for efficiency
-        return 4; // Large body
-    }
-
-    /**
-     * ENERGY BUDGET SYSTEM
-     * 
-     * Reserve 30-40% of energy for emergencies (defense, quick replacements)
-     * Use only 60-70% of available energy for normal spawning
-     * 
-     * Emergency Override: When total creeps < 5, use up to 100%
-     * to get economy started quickly
-     */
-    getMaxBudget(energyCapacity, creeps) {
-        // Emergency: Very few creeps - use full capacity to bootstrap
-        if (creeps.length < 3) {
-            return energyCapacity;
-        }
-        
-        // Early game: 3-6 creeps - use 80% (some reserve)
-        if (creeps.length < 7) {
-            return Math.floor(energyCapacity * 0.80);
-        }
-        
-        // Normal operation: Use 65% of energy capacity
-        // Reserve 35% for emergencies (defense creeps, sudden losses)
-        return Math.floor(energyCapacity * 0.65);
-    }
-
-    /**
-     * Get scaled energy budget based on tier
-     * Uses the emergency-reserve system
-     */
-    getEnergyBudget(energyCapacity, tier, creeps) {
-        const maxBudget = this.getMaxBudget(energyCapacity, creeps);
-        
-        // Tier 1: 200-300 energy (emergency/minimal)
-        // Tier 2: 300-500 energy (early game)  
-        // Tier 3: 500-800 energy (mid game)
-        // Tier 4: Use max budget (still limited to 65% of capacity)
-        
-        const budgets = {
-            1: Math.min(300, maxBudget),
-            2: Math.min(500, maxBudget),
-            3: Math.min(800, maxBudget),
-            4: maxBudget
-        };
-        
-        return budgets[tier] || 300;
-    }
-
-    /**
-     * Get harvester body and calculate cost
-     * Scales based on room progress
-     */
-    getHarvesterCost(energyCapacity, tier, creeps) {
-        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
-        // WORK = 100, CARRY = 50, MOVE = 50
-        // Minimum: WORK + CARRY + MOVE = 200
-        // Reserve 100 for CARRY + MOVE, rest for WORK
-        const workParts = Math.min(Math.floor((budget - 100) / 100), 5);
-        return 100 * Math.max(1, workParts) + 100;
-    }
-
-    getHarvesterBody(energyCapacity, room, creeps) {
-        const tier = this.getBodyTier(room, creeps, 'harvester');
-        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
-        
-        const body = [];
-        let remaining = budget - 100; // Reserve for CARRY + MOVE
-        const maxWork = Math.min(Math.floor(remaining / 100), 5);
-        
-        // At least 1 WORK part
-        const workParts = Math.max(1, maxWork);
-        
-        for (let i = 0; i < workParts; i++) {
-            body.push(WORK);
-        }
-        body.push(CARRY);
-        body.push(MOVE);
-        return body;
-    }
-
-    getRunnerCost(energyCapacity, tier, creeps) {
-        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
-        // CARRY + MOVE = 100 per set
-        const sets = Math.min(Math.floor(budget / 100), 16);
-        return Math.max(2, sets) * 100; // At least 2 sets
-    }
-
-    getRunnerBody(energyCapacity, room, creeps) {
-        const tier = this.getBodyTier(room, creeps, 'runner');
-        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
-        
-        const body = [];
-        let remaining = budget;
-        
-        // Minimum: 2 CARRY + 2 MOVE = 4 parts (400 energy at tier 4)
-        // Or 1 CARRY + 1 MOVE = 2 parts (200 energy at tier 1-2)
-        const minSets = tier <= 2 ? 1 : 2;
-        
-        // Add CARRY, MOVE pairs
-        while (remaining >= 100 && body.length < 50 - 2) {
-            body.push(CARRY);
-            body.push(MOVE);
-            remaining -= 100;
-        }
-        
-        // Ensure minimum size
-        if (body.length < minSets * 2) {
-            for (let i = body.length / 2; i < minSets; i++) {
-                body.push(CARRY);
-                body.push(MOVE);
-            }
-        }
-        
-        return body.length > 0 ? body : [CARRY, MOVE];
-    }
-
-    getUpgraderCost(energyCapacity, tier, creeps) {
-        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
-        // WORK + CARRY + MOVE = 200 per set
-        const sets = Math.min(Math.floor(budget / 200), 16);
-        return Math.max(1, sets) * 200;
-    }
-
-    getUpgraderBody(energyCapacity, room, creeps) {
-        const tier = this.getBodyTier(room, creeps, 'upgrader');
-        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
-        
-        const body = [];
-        const maxSets = Math.min(Math.floor(budget / 200), 16);
-        const sets = Math.max(1, maxSets); // At least 1 set
-        
-        for (let i = 0; i < sets; i++) {
-            body.push(WORK);
-            body.push(CARRY);
-            body.push(MOVE);
-        }
-        return body;
-    }
-
-    getBuilderCost(energyCapacity, tier, creeps) {
-        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
-        const sets = Math.min(Math.floor(budget / 200), 16);
-        return Math.max(1, sets) * 200;
-    }
-
-    getBuilderBody(energyCapacity, room, creeps) {
-        const tier = this.getBodyTier(room, creeps, 'builder');
-        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
-        
-        const body = [];
-        const maxSets = Math.min(Math.floor(budget / 200), 16);
-        const sets = Math.max(1, maxSets);
-        
-        for (let i = 0; i < sets; i++) {
-            body.push(WORK);
-            body.push(CARRY);
-            body.push(MOVE);
-        }
-        return body;
-    }
-
-    getRepairerCost(energyCapacity, tier, creeps) {
-        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
-        const sets = Math.min(Math.floor(budget / 200), 16);
-        return Math.max(1, sets) * 200;
-    }
-
-    getRepairerBody(energyCapacity, room, creeps) {
-        const tier = this.getBodyTier(room, creeps, 'repairer');
-        const budget = this.getEnergyBudget(energyCapacity, tier, creeps);
-        
-        const body = [];
-        const maxSets = Math.min(Math.floor(budget / 200), 16);
-        const sets = Math.max(1, maxSets);
-        
-        for (let i = 0; i < sets; i++) {
-            body.push(WORK);
-            body.push(CARRY);
-            body.push(MOVE);
-        }
-        return body;
-    }
-
-    spawnHarvester(spawn, source, energyCapacity, room, creeps) {
-        if (!source) return ERR_INVALID_ARGS;
-        
-        const body = this.getHarvesterBody(energyCapacity, room, creeps);
-        if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
-
-        const name = 'Harvester' + Game.time;
-        const result = spawn.spawnCreep(body, name, {
-            memory: { 
-                role: 'harvester', 
-                sourceId: source.id,
-                delivering: false,
-                harvestPos: null
-            }
-        });
-
-        if (result === OK) {
-            console.log('🌱 Spawning harvester: ' + name + ' [' + body.length + ' parts]');
-        }
-        return result;
-    }
-
-    spawnRunner(spawn, energyCapacity, room, creeps) {
-        const body = this.getRunnerBody(energyCapacity, room, creeps);
-        if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
-
-        const name = 'Runner' + Game.time;
-        const result = spawn.spawnCreep(body, name, {
-            memory: { role: 'runner' }
-        });
-
-        if (result === OK) {
-            console.log('🏃 Spawning runner: ' + name + ' [' + body.length + ' parts]');
-        }
-        return result;
-    }
-
-    spawnUpgrader(spawn, energyCapacity, room, creeps) {
-        const body = this.getUpgraderBody(energyCapacity, room, creeps);
-        if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
-
-        const name = 'Upgrader' + Game.time;
-        const result = spawn.spawnCreep(body, name, {
-            memory: { role: 'upgrader' }
-        });
-
-        if (result === OK) {
-            console.log('⚡ Spawning upgrader: ' + name + ' [' + body.length + ' parts]');
-        }
-        return result;
-    }
-
-    spawnBuilder(spawn, energyCapacity, room, creeps) {
-        const body = this.getBuilderBody(energyCapacity, room, creeps);
-        if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
-
-        const name = 'Builder' + Game.time;
-        const result = spawn.spawnCreep(body, name, {
-            memory: { role: 'builder' }
-        });
-
-        if (result === OK) {
-            console.log('🔨 Spawning builder: ' + name + ' [' + body.length + ' parts]');
-        }
-        return result;
-    }
-
-    spawnRepairer(spawn, energyCapacity, room, creeps) {
-        const body = this.getRepairerBody(energyCapacity, room, creeps);
-        if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
-
-        const name = 'Repairer' + Game.time;
-        const result = spawn.spawnCreep(body, name, {
-            memory: { role: 'repairer' }
-        });
-
-        if (result === OK) {
-            console.log('🔧 Spawning repairer: ' + name + ' [' + body.length + ' parts]');
-        }
-        return result;
-    }
-
-    /**
-     * Get the next creep(s) that should be spawned based on current room state
-     * Returns an array of up to 2 next priority spawns
-     */
-    getNextSpawnPriority(room) {
-        const creeps = room.find(FIND_MY_CREEPS);
-        const harvesters = creeps.filter(c => c.memory.role === 'harvester');
-        const upgraders = creeps.filter(c => c.memory.role === 'upgrader');
-        const builders = creeps.filter(c => c.memory.role === 'builder');
-        const repairers = creeps.filter(c => c.memory.role === 'repairer');
-        const runners = creeps.filter(c => c.memory.role === 'runner');
-
-        const sources = room.find(FIND_SOURCES);
-        let totalSourcePositions = 0;
-        for (const source of sources) {
-            totalSourcePositions += this.countOpenPositions(source);
-        }
-
+    getNextSpawnPriority(room, harvesterCount, upgraderCount, builderCount, repairerCount, runnerCount, totalSourcePositions) {
+        const requiredHarvesters = Math.floor(totalSourcePositions / 2);
         const priorities = [];
 
-        // EMERGENCY: Need harvesters immediately
-        if (harvesters.length < 2) {
+        // Phase 1: Harvesters
+        if (harvesterCount < requiredHarvesters) {
             priorities.push({
                 role: 'harvester',
                 emoji: '🌱',
-                reason: 'EMERGENCY: Only ' + harvesters.length + ' harvester(s)',
+                reason: `${harvesterCount}/${requiredHarvesters} harvesters (Phase 1)`,
                 priority: 1
             });
-            if (priorities.length >= 2) return priorities;
-            
-            if (harvesters.length < 2) {
-                priorities.push({
-                    role: 'harvester',
-                    emoji: '🌱',
-                    reason: 'Emergency backup',
-                    priority: 2
-                });
-                return priorities;
-            }
         }
 
-        // PHASE 1: Initial startup - need 2 harvesters then 1 RUNNER (not upgrader yet!)
-        // Runner is needed before upgrader to ensure energy transport
-        const inStationaryMode = room.memory.harvesterMode === 'stationary' || room.memory.stationaryMode;
-        
-        if (harvesters.length < 2) {
-            priorities.push({
-                role: 'harvester',
-                emoji: '🌱',
-                reason: 'Need ' + (2 - harvesters.length) + ' more to reach 2',
-                priority: 1
-            });
-            if (priorities.length >= 2) return priorities;
-        } else if (harvesters.length >= 2 && runners.length < 1 && !inStationaryMode) {
-            // PHASE 1 CONTINUED: Have 2 harvesters, now need runner
-            priorities.push({
-                role: 'runner',
-                emoji: '🏃',
-                reason: 'Phase 1: First runner needed for energy transport',
-                priority: 1
-            });
-            if (priorities.length >= 2) return priorities;
-        } else if (harvesters.length >= 2 && runners.length >= 1 && upgraders.length < 1 && !inStationaryMode) {
-            // PHASE 2: Have harvesters and runner, now need upgrader
+        // Phase 2: Upgraders
+        if (upgraderCount < 3) {
             priorities.push({
                 role: 'upgrader',
                 emoji: '⚡',
-                reason: 'Phase 2: First upgrader for controller progress',
+                reason: `${upgraderCount}/3 upgraders (Phase 2)`,
                 priority: 1
             });
-            if (priorities.length >= 2) return priorities;
         }
 
-        // PHASE 2: Fill harvester positions - only need open spaces / 2
-        const maxHarvestersForPriority = Math.floor(totalSourcePositions / 2);
-        if (harvesters.length < maxHarvestersForPriority) {
-            priorities.push({
-                role: 'harvester',
-                emoji: '🌱',
-                reason: harvesters.length + '/' + maxHarvestersForPriority + ' harvesters (open spaces / 2)',
-                priority: 1
-            });
-            if (priorities.length >= 2) return priorities;
-            
-            // Second harvester if still needed
-            if (harvesters.length + 1 < maxHarvestersForPriority) {
-                priorities.push({
-                    role: 'harvester',
-                    emoji: '🌱',
-                    reason: 'Filling harvester count',
-                    priority: 2
-                });
-                return priorities;
-            }
-        }
-
-        // PHASE 3 (Stationary Mode): Spawn Runners
-        // Trigger when we have minimum harvesters needed (open spaces / 2)
-        if (harvesters.length >= maxHarvestersForPriority) {
-            const desiredRunners = Math.min(3, Math.ceil(harvesters.length / 2));
-            if (runners.length < desiredRunners) {
-                priorities.push({
-                    role: 'runner',
-                    emoji: '🏃',
-                    reason: runners.length + '/' + desiredRunners + ' runners needed',
-                    priority: 1
-                });
-                if (priorities.length >= 2) return priorities;
-                
-                if (runners.length + 1 < desiredRunners) {
-                    priorities.push({
-                        role: 'runner',
-                        emoji: '🏃',
-                        reason: 'Moving dropped energy',
-                        priority: 2
-                    });
-                    return priorities;
-                }
-            }
-
-            // PHASE 3: Spawn Upgraders
-            const desiredUpgraders = Math.min(3, Math.max(1, harvesters.length));
-            if (upgraders.length < desiredUpgraders) {
-                priorities.push({
-                    role: 'upgrader',
-                    emoji: '⚡',
-                    reason: upgraders.length + '/' + desiredUpgraders + ' (1:1 ratio)',
-                    priority: 1
-                });
-                if (priorities.length >= 2) return priorities;
-                
-                if (upgraders.length + 1 < desiredUpgraders) {
-                    priorities.push({
-                        role: 'upgrader',
-                        emoji: '⚡',
-                        reason: 'Upgrading controller',
-                        priority: 2
-                    });
-                    return priorities;
-                }
-            }
-        }
-
-        // PHASE 4: Builders and Repairers
-        // New ratios: Builders:Upgraders = 1:1, Repairers = (Builders+Upgraders)/2
-        const maxBuilders = 3;
-        const sites = room.find(FIND_CONSTRUCTION_SITES);
-        
-        // Calculate desired builders (1:1 with upgraders)
-        const desiredBuilders = Math.min(upgraders.length, maxBuilders);
-        
-        // Allow at least 1 builder even without sites, for future building
-        const minBuilders = sites.length > 0 ? 1 : 0;
-        const actualDesiredBuilders = Math.max(minBuilders, Math.min(desiredBuilders, sites.length > 0 ? maxBuilders : 1));
-        
-        // Check if builder needed (builders come before repairers)
-        if (builders.length < actualDesiredBuilders) {
+        // Phase 3: Builders
+        if (builderCount < 3) {
             priorities.push({
                 role: 'builder',
                 emoji: '🔨',
-                reason: builders.length + '/' + actualDesiredBuilders + ' builders, ' + sites.length + ' sites',
+                reason: `${builderCount}/3 builders (Phase 3)`,
                 priority: 1
             });
-            if (priorities.length >= 2) return priorities;
         }
-        
-        // Check if repairer needed (repairers = (builders + upgraders) / 2)
-        const needsRepair = this.needsRepair(room);
-        const desiredRepairers = Math.ceil((builders.length + upgraders.length) / 2);
-        const maxRepairers = 4;
-        
-        if (repairers.length < desiredRepairers && repairers.length < maxRepairers) {
-            if (needsRepair || repairers.length === 0) {
-                priorities.push({
-                    role: 'repairer',
-                    emoji: '🔧',
-                    reason: repairers.length + '/' + desiredRepairers + ' repairers ((B+U)/2)',
-                    priority: priorities.length === 0 ? 1 : 2
-                });
-                if (priorities.length >= 2) return priorities;
-            }
-        }
-        
-        // PHASE 5: Remote Workers
-        const neededRemoteHarvesters = room.memory.neededRemoteHarvesters || 0;
-        const neededHaulers = room.memory.neededHaulers || 0;
-        const neededClaimers = room.memory.neededClaimers || 0;
-        
-        if (neededRemoteHarvesters > 0) {
+
+        // Phase 4: Runners
+        if (runnerCount < 3) {
             priorities.push({
-                role: 'remoteharvester',
-                emoji: '🌍',
-                reason: neededRemoteHarvesters + ' remote harvesters needed',
+                role: 'runner',
+                emoji: '🏃',
+                reason: `${runnerCount}/3 runners (Phase 4)`,
                 priority: 1
             });
-            if (priorities.length >= 2) return priorities;
         }
-        
-        if (neededHaulers > 0) {
+
+        // Phase 4: Repairers
+        if (repairerCount < 2) {
             priorities.push({
-                role: 'hauler',
-                emoji: '🚚',
-                reason: neededHaulers + ' haulers needed',
-                priority: priorities.length === 0 ? 1 : 2
+                role: 'repairer',
+                emoji: '🔧',
+                reason: `${repairerCount}/2 repairers (Phase 4)`,
+                priority: 1
             });
-            if (priorities.length >= 2) return priorities;
         }
-        
-        if (neededClaimers > 0) {
-            priorities.push({
-                role: 'claimer',
-                emoji: '🏳️',
-                reason: neededClaimers + ' claimers needed',
-                priority: priorities.length === 0 ? 1 : 2
-            });
-            if (priorities.length >= 2) return priorities;
-        }
-        
-        // If no specific needs, show what's at capacity
+
+        // All phases complete
         if (priorities.length === 0) {
-            if (room.memory.stationaryMode) {
-                priorities.push({
-                    role: 'upgrader',
-                    emoji: '⚡',
-                    reason: 'All creeps at capacity - spawning for upgrades',
-                    priority: 1
-                });
-            } else {
-                priorities.push({
-                    role: 'harvester',
-                    emoji: '🌱',
-                    reason: 'All positions filled - maintaining count',
-                    priority: 1
-                });
-            }
+            priorities.push({
+                role: 'upgrader',
+                emoji: '⚡',
+                reason: 'All creeps spawned - maintaining',
+                priority: 1
+            });
         }
 
         return priorities;
     }
-    
-    // Remote worker body and spawn methods
-    getRemoteHarvesterCost(energyCapacity) {
-        // Remote harvester: WORK, WORK, CARRY, MOVE
-        // Needs to build container and harvest
-        const maxSets = Math.min(Math.floor(energyCapacity / 350), 5);
-        return maxSets > 0 ? maxSets * 350 : 350;
-    }
-    
-    getRemoteHarvesterBody(energyCapacity) {
-        const body = [];
-        // Maximize work parts for remote harvesting
-        let remaining = energyCapacity;
-        
-        while (remaining >= 350 && body.length < 50 - 4) {
-            body.push(WORK);
-            body.push(WORK);
-            body.push(CARRY);
-            body.push(MOVE);
-            remaining -= 350;
+
+    // ==================== SPAWN METHODS ====================
+
+    spawnHarvester(spawn, sources, room, creeps) {
+        // Find source with fewest harvesters
+        let bestSource = sources[0];
+        let minHarvesters = Infinity;
+
+        for (const source of sources) {
+            const harvestersAtSource = creeps.filter(c =>
+                c.memory.role === 'harvester' && c.memory.sourceId === source.id
+            ).length;
+            if (harvestersAtSource < minHarvesters) {
+                minHarvesters = harvestersAtSource;
+                bestSource = source;
+            }
         }
-        
-        return body.length > 0 ? body : [WORK, WORK, CARRY, MOVE];
-    }
-    
-    getHaulerCost(energyCapacity) {
-        // Hauler: CARRY, CARRY, MOVE - efficient transport
-        const maxSets = Math.min(Math.floor(energyCapacity / 150), 16);
-        return maxSets > 0 ? maxSets * 150 : 150;
-    }
-    
-    getHaulerBody(energyCapacity) {
-        const body = [];
-        // Maximize carry capacity
-        let remaining = energyCapacity;
-        
-        while (remaining >= 100 && body.length < 50 - 2) {
-            body.push(CARRY);
-            body.push(CARRY);
-            body.push(MOVE);
-            remaining -= 150;
-        }
-        
-        return body.length > 0 ? body : [CARRY, CARRY, MOVE];
-    }
-    
-    getClaimerCost(energyCapacity) {
-        // Claimer needs CLAIM part
-        return 650; // CLAIM + MOVE
-    }
-    
-    getClaimerBody(energyCapacity) {
-        return [CLAIM, MOVE];
-    }
-    
-    spawnRemoteHarvester(spawn, energyCapacity, homeRoomName) {
-        const body = this.getRemoteHarvesterBody(energyCapacity);
-        if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
-        
-        const name = 'RemoteHarvester' + Game.time;
-        const result = spawn.spawnCreep(body, name, {
+
+        const name = 'Harvester' + Game.time;
+        const result = spawn.spawnCreep([WORK, CARRY, MOVE], name, {
             memory: {
-                role: 'remoteharvester',
-                homeRoom: homeRoomName
+                role: 'harvester',
+                sourceId: bestSource.id,
+                delivering: false
             }
         });
-        
+
         if (result === OK) {
-            console.log('🌍 Spawning remote harvester: ' + name);
+            console.log(`🌱 Spawning harvester for source ${bestSource.id}`);
         }
-        return result;
     }
-    
-    spawnHauler(spawn, energyCapacity, homeRoomName) {
-        const body = this.getHaulerBody(energyCapacity);
-        if (body.length === 0) return ERR_NOT_ENOUGH_ENERGY;
-        
-        const name = 'Hauler' + Game.time;
-        const result = spawn.spawnCreep(body, name, {
-            memory: {
-                role: 'hauler',
-                homeRoom: homeRoomName
-            }
+
+    spawnUpgrader(spawn, energyCapacity, room, creeps) {
+        const name = 'Upgrader' + Game.time;
+        const result = spawn.spawnCreep([WORK, CARRY, MOVE], name, {
+            memory: { role: 'upgrader' }
         });
-        
+
         if (result === OK) {
-            console.log('🚚 Spawning hauler: ' + name);
+            console.log('⚡ Spawning upgrader');
         }
-        return result;
     }
-    
-    spawnClaimer(spawn, homeRoomName) {
-        const body = [CLAIM, MOVE];
-        const name = 'Claimer' + Game.time;
-        const result = spawn.spawnCreep(body, name, {
-            memory: {
-                role: 'claimer',
-                homeRoom: homeRoomName
-            }
+
+    spawnBuilder(spawn, energyCapacity, room, creeps) {
+        const name = 'Builder' + Game.time;
+        const result = spawn.spawnCreep([WORK, CARRY, MOVE], name, {
+            memory: { role: 'builder' }
         });
-        
+
         if (result === OK) {
-            console.log('🏳️ Spawning claimer: ' + name);
+            console.log('🔨 Spawning builder');
         }
-        return result;
+    }
+
+    spawnRunner(spawn, energyCapacity, room, creeps) {
+        const name = 'Runner' + Game.time;
+        const result = spawn.spawnCreep([CARRY, CARRY, MOVE, MOVE], name, {
+            memory: { role: 'runner' }
+        });
+
+        if (result === OK) {
+            console.log('🏃 Spawning runner');
+        }
+    }
+
+    spawnRepairer(spawn, energyCapacity, room, creeps) {
+        const name = 'Repairer' + Game.time;
+        const result = spawn.spawnCreep([WORK, CARRY, MOVE], name, {
+            memory: { role: 'repairer' }
+        });
+
+        if (result === OK) {
+            console.log('🔧 Spawning repairer');
+        }
     }
 }
 
@@ -5664,26 +4889,36 @@ class CreepManager {
 }
 
 /**
- * MOKITO PHASE MANAGEMENT SYSTEM v4
+ * MOKITO PHASE MANAGEMENT SYSTEM v5
  *
- * Comprehensive phase determination based on:
- * - CREEP COUNTS: harvesters, runners, upgraders, builders, repairers
- * - BUILDINGS: extensions, containers, roads, ramparts, towers, storage
- * - RCL: Room Controller Level
- * - GCL: Global Control Level
- * - DEFENSES: walls, ramparts, tower count
+ * NEW PHASE STRUCTURE (as of 2026-04-18):
  *
- * Phase Criteria (MUST meet ALL for each phase):
- * Phase 0: harvesters < 2 [EMERGENCY]
- * Phase 1: harvesters >= 2
- * Phase 2: harvesters >= 2 AND upgraders >= 1
- * Phase 3: harvesters >= sourcePositions AND builders >= 1 AND extensions >= 5
- * Phase 4: Phase 3 + runners >= ceil(harvesters/2) AND stationary mode active
- * Phase 5: Phase 4 + storage exists AND RCL >= 4 [MOVED FROM PHASE 9]
- * Phase 6: Phase 5 + containers >= sources.length
- * Phase 7: Phase 6 + roads >= 10
- * Phase 8: Phase 7 + ramparts >= 3 AND RCL >= 4
- * Phase 9: Phase 8 + towers >= maxTowers AND RCL >= 3
+ * Phase 1: HARVESTERS
+ *   - Spawn harvesters based on: open_spaces / 2 (rounded down)
+ *   - Harvesters deliver energy to spawn/extensions
+ *
+ * Phase 2: UPGRADERS
+ *   - Spawn 3 upgraders
+ *   - Focus on controller progress
+ *
+ * Phase 3: BUILDERS + EXTENSIONS
+ *   - Spawn 3 builders
+ *   - Build extensions to increase energy capacity
+ *
+ * Phase 4: RUNNERS + REPAIRERS + STATIONARY HARVESTING
+ *   - Spawn 3 runners
+ *   - Spawn 2 repairers
+ *   - First runner triggers stationary harvesting mode
+ *
+ * Phase 5: ROAD NETWORK
+ *   - Build roads throughout the room
+ *
+ * Phase 6: RAMPARTS (Room Defense)
+ *   - Build ramparts 2+ spaces from room exits
+ *   - Create continuous wall with no openings
+ *
+ * Phase 7+: COMING SOON
+ *   - Not yet implemented
  */
 class Mokito {
     constructor() {
@@ -5691,12 +4926,12 @@ class Mokito {
         this.roomManager = new RoomManager();
         this.memoryManager = new MemoryManager();
     }
-    
+
     run() {
         this.memoryManager.cleanup();
         this.roomManager.run();
         this.creepManager.run();
-        
+
         // Heartbeat every 60 ticks
         if (Game.time % 60 === 0) {
             // Find the home room (owned room with controller and spawn)
@@ -5711,7 +4946,7 @@ class Mokito {
                     }
                 }
             }
-            
+
             // Fallback: use any owned room
             if (!homeRoom) {
                 for (const roomName in Game.rooms) {
@@ -5722,65 +4957,13 @@ class Mokito {
                     }
                 }
             }
-            
+
             if (homeRoom) {
                 const metrics = this.gatherRoomMetrics(homeRoom);
                 const phase = this.getCurrentPhase(homeRoom, metrics);
                 this.logHeartbeat(homeRoom, metrics, phase);
             }
         }
-    }
-
-    /**
-     * Gather all room metrics for phase determination
-     */
-    gatherRoomMetrics(room) {
-        const creeps = room.find(FIND_MY_CREEPS);
-        const structures = room.find(FIND_MY_STRUCTURES);
-        const allStructures = room.find(FIND_STRUCTURES);
-        const constructionSites = room.find(FIND_CONSTRUCTION_SITES);
-        
-        // Creep counts
-        const metrics = {
-            harvesters: creeps.filter(c => c.memory.role === 'harvester').length,
-            runners: creeps.filter(c => c.memory.role === 'runner').length,
-            upgraders: creeps.filter(c => c.memory.role === 'upgrader').length,
-            builders: creeps.filter(c => c.memory.role === 'builder').length,
-            repairers: creeps.filter(c => c.memory.role === 'repairer').length,
-            defenders: creeps.filter(c => c.memory.role === 'defender').length,
-            remoteHarvesters: creeps.filter(c => c.memory.role === 'remoteharvester').length,
-            haulers: creeps.filter(c => c.memory.role === 'hauler').length,
-            claimers: creeps.filter(c => c.memory.role === 'claimer').length,
-            totalCreeps: creeps.length,
-            
-            // Buildings
-            extensions: structures.filter(s => s.structureType === STRUCTURE_EXTENSION).length,
-            maxExtensions: CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.controller.level] || 0,
-            containers: allStructures.filter(s => s.structureType === STRUCTURE_CONTAINER).length,
-            roads: allStructures.filter(s => s.structureType === STRUCTURE_ROAD).length,
-            ramparts: structures.filter(s => s.structureType === STRUCTURE_RAMPART).length,
-            walls: structures.filter(s => s.structureType === STRUCTURE_WALL).length,
-            towers: structures.filter(s => s.structureType === STRUCTURE_TOWER).length,
-            maxTowers: CONTROLLER_STRUCTURES[STRUCTURE_TOWER][room.controller.level] || 0,
-            storage: structures.find(s => s.structureType === STRUCTURE_STORAGE),
-            spawn: structures.find(s => s.structureType === STRUCTURE_SPAWN),
-            
-            // Construction
-            constructionSites: constructionSites.length,
-            
-            // Resources
-            droppedEnergy: room.find(FIND_DROPPED_RESOURCES, {
-                filter: r => r.resourceType === RESOURCE_ENERGY
-            }).reduce((sum, r) => sum + r.amount, 0),
-            
-            // Room state
-            rcl: room.controller.level,
-            gcl: Game.gcl.level,
-            totalSourcePositions: this.calculateSourcePositions(room),
-            inStationaryMode: Memory.rooms[room.name]?.harvesterMode === 'stationary'
-        };
-        
-        return metrics;
     }
 
     /**
@@ -5808,6 +4991,52 @@ class Mokito {
     }
 
     /**
+     * Gather all room metrics for phase determination
+     */
+    gatherRoomMetrics(room) {
+        const creeps = room.find(FIND_MY_CREEPS);
+        const structures = room.find(FIND_MY_STRUCTURES);
+        const allStructures = room.find(FIND_STRUCTURES);
+        const constructionSites = room.find(FIND_CONSTRUCTION_SITES);
+
+        // Creep counts
+        const metrics = {
+            harvesters: creeps.filter(c => c.memory.role === 'harvester').length,
+            runners: creeps.filter(c => c.memory.role === 'runner').length,
+            upgraders: creeps.filter(c => c.memory.role === 'upgrader').length,
+            builders: creeps.filter(c => c.memory.role === 'builder').length,
+            repairers: creeps.filter(c => c.memory.role === 'repairer').length,
+            totalCreeps: creeps.length,
+
+            // Buildings
+            extensions: structures.filter(s => s.structureType === STRUCTURE_EXTENSION).length,
+            maxExtensions: CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.controller.level] || 0,
+            roads: allStructures.filter(s => s.structureType === STRUCTURE_ROAD).length,
+            ramparts: structures.filter(s => s.structureType === STRUCTURE_RAMPART).length,
+            towers: structures.filter(s => s.structureType === STRUCTURE_TOWER).length,
+            maxTowers: CONTROLLER_STRUCTURES[STRUCTURE_TOWER][room.controller.level] || 0,
+            storage: structures.find(s => s.structureType === STRUCTURE_STORAGE),
+            spawn: structures.find(s => s.structureType === STRUCTURE_SPAWN),
+
+            // Construction
+            constructionSites: constructionSites.length,
+
+            // Resources
+            droppedEnergy: room.find(FIND_DROPPED_RESOURCES, {
+                filter: r => r.resourceType === RESOURCE_ENERGY
+            }).reduce((sum, r) => sum + r.amount, 0),
+
+            // Room state
+            rcl: room.controller.level,
+            gcl: Game.gcl.level,
+            totalSourcePositions: this.calculateSourcePositions(room),
+            inStationaryMode: Memory.rooms[room.name]?.harvesterMode === 'stationary'
+        };
+
+        return metrics;
+    }
+
+    /**
      * Initialize phase tracking memory
      */
     initPhaseMemory(roomName) {
@@ -5819,7 +5048,7 @@ class Mokito {
         }
         if (!Memory.mokito.phaseTracking[roomName]) {
             Memory.mokito.phaseTracking[roomName] = {
-                currentPhase: 0,
+                currentPhase: 1,
                 phaseDropTimer: 0,
                 lastPhaseCheck: Game.time
             };
@@ -5831,163 +5060,89 @@ class Mokito {
      * Check if metrics meet phase criteria
      */
     checkPhaseCriteria(phase, metrics) {
+        // Calculate required harvesters: open spaces / 2, rounded down
+        const requiredHarvesters = Math.floor(metrics.totalSourcePositions / 2);
+
         switch (phase) {
-            case 0: // Emergency
-                return metrics.harvesters < 2;
-                
-            case 1: // Foundation
-                return metrics.harvesters >= 2;
-                
-            case 2: // Stabilization
-                return metrics.harvesters >= 2 && 
-                       metrics.upgraders >= 1;
-                
-            case 3: // Capacity
-                // Need open spaces / 2 harvesters (rounded down)
-                const minHarvestersForPhase3 = Math.floor(metrics.totalSourcePositions / 2);
-                return metrics.harvesters >= minHarvestersForPhase3 &&
-                       metrics.builders >= 1 &&
-                       metrics.extensions >= 5 &&
-                       metrics.rcl >= 2;
-                
-            case 4: // Efficiency (Stationary) - Need open spaces / 2 harvesters
-                const desiredRunners4 = Math.ceil(metrics.harvesters / 2);
-                return metrics.harvesters >= Math.floor(metrics.totalSourcePositions / 2) &&
-                       metrics.runners >= desiredRunners4 &&
-                       metrics.upgraders >= 1 &&
-                       metrics.inStationaryMode &&
-                       metrics.rcl >= 2;
-                
-            case 5: // Storage - Resource Buffer (moved from phase 9)
-                if (!this.checkPhaseCriteria(4, metrics)) {
-                    return false;
-                }
-                return metrics.storage !== undefined &&
-                       metrics.rcl >= 4;
-                
-            case 6: // Infrastructure - Containers
-                if (!this.checkPhaseCriteria(5, metrics)) {
-                    return false;
-                }
-                const numSources = Math.floor(metrics.totalSourcePositions / 8); // Approximate
-                return metrics.containers >= Math.floor(numSources);
-                
-            case 7: // Infrastructure - Roads
-                if (!this.checkPhaseCriteria(6, metrics)) {
-                    return false;
-                }
+            case 1: // Phase 1: Harvesters
+                return metrics.harvesters >= requiredHarvesters;
+
+            case 2: // Phase 2: Upgraders
+                return metrics.harvesters >= requiredHarvesters &&
+                       metrics.upgraders >= 3;
+
+            case 3: // Phase 3: Builders + Extensions
+                return metrics.harvesters >= requiredHarvesters &&
+                       metrics.upgraders >= 3 &&
+                       metrics.builders >= 3;
+
+            case 4: // Phase 4: Runners + Repairers (Stationary)
+                return metrics.harvesters >= requiredHarvesters &&
+                       metrics.upgraders >= 3 &&
+                       metrics.builders >= 3 &&
+                       metrics.runners >= 3 &&
+                       metrics.repairers >= 2;
+
+            case 5: // Phase 5: Road Network
+                if (!this.checkPhaseCriteria(4, metrics)) return false;
                 return metrics.roads >= 10;
-                
-            case 8: // Defense - Ramparts
-                if (!this.checkPhaseCriteria(7, metrics)) {
-                    return false;
-                }
-                return metrics.ramparts >= 3 &&
-                       metrics.rcl >= 4;
-                
-            case 9: // Defense - Towers
-                if (!this.checkPhaseCriteria(8, metrics)) {
-                    return false;
-                }
-                return metrics.towers >= metrics.maxTowers &&
-                       metrics.rcl >= 3;
-                
+
+            case 6: // Phase 6: Ramparts
+                if (!this.checkPhaseCriteria(5, metrics)) return false;
+                return metrics.ramparts >= 3 && metrics.rcl >= 4;
+
+            case 7: // Phase 7+: COMING SOON
+            case 8:
+            case 9:
+                // Not implemented yet
+                return false;
+
             default:
                 return false;
         }
     }
 
     /**
-     * Determine current phase with grace periods
+     * Determine current phase
      */
     getCurrentPhase(room, metrics) {
         const phaseMem = this.initPhaseMemory(room.name);
-        
-        // Emergency check - immediate
-        if (metrics.harvesters < 2) {
-            phaseMem.currentPhase = 0;
-            phaseMem.phaseDropTimer = 0;
-            return {
-                current: 0,
-                name: this.getPhaseName(0, metrics),
-                gracePeriod: 0,
-                metrics: metrics
-            };
-        }
-        
-        // Find highest phase we meet
-        let highestMetPhase = 0;
-        for (let p = 9; p >= 0; p--) {
+
+        // Check each phase from highest to lowest
+        for (let p = 6; p >= 1; p--) {
             if (this.checkPhaseCriteria(p, metrics)) {
-                highestMetPhase = p;
-                break;
-            }
-        }
-        
-        // Handle transitions
-        if (highestMetPhase > phaseMem.currentPhase) {
-            // Advancing - immediate
-            phaseMem.currentPhase = highestMetPhase;
-            phaseMem.phaseDropTimer = 0;
-            return {
-                current: phaseMem.currentPhase,
-                name: this.getPhaseName(phaseMem.currentPhase, metrics),
-                gracePeriod: 0,
-                metrics: metrics
-            };
-        } else if (highestMetPhase < phaseMem.currentPhase) {
-            // Dropping - grace period
-            if (phaseMem.phaseDropTimer === 0) {
-                phaseMem.phaseDropTimer = Game.time + 100;
+                phaseMem.currentPhase = p;
                 return {
-                    current: phaseMem.currentPhase,
-                    name: this.getPhaseName(phaseMem.currentPhase, metrics),
-                    gracePeriod: 100,
-                    metrics: metrics
-                };
-            } else if (Game.time >= phaseMem.phaseDropTimer) {
-                phaseMem.currentPhase = highestMetPhase;
-                phaseMem.phaseDropTimer = 0;
-                return {
-                    current: phaseMem.currentPhase,
-                    name: this.getPhaseName(phaseMem.currentPhase, metrics),
-                    gracePeriod: 0,
-                    metrics: metrics
-                };
-            } else {
-                return {
-                    current: phaseMem.currentPhase,
-                    name: this.getPhaseName(phaseMem.currentPhase, metrics),
-                    gracePeriod: phaseMem.phaseDropTimer - Game.time,
+                    current: p,
+                    name: this.getPhaseName(p),
                     metrics: metrics
                 };
             }
-        } else {
-            phaseMem.phaseDropTimer = 0;
-            return {
-                current: phaseMem.currentPhase,
-                name: this.getPhaseName(phaseMem.currentPhase, metrics),
-                gracePeriod: 0,
-                metrics: metrics
-            };
         }
+
+        // Default to Phase 1 if none met
+        phaseMem.currentPhase = 1;
+        return {
+            current: 1,
+            name: this.getPhaseName(1),
+            metrics: metrics
+        };
     }
 
     /**
-     * Get phase display name with context
+     * Get phase display name
      */
-    getPhaseName(phase, metrics) {
+    getPhaseName(phase) {
         const names = {
-            0: 'Emergency - No Harvesters!',
-            1: 'Foundation - Basic Energy',
-            2: 'Stabilization - Controller Progress',
-            3: 'Capacity - Extensions & Full Sources',
-            4: 'Efficiency - Stationary Mode',
-            5: 'Storage - Resource Buffer',
-            6: 'Infrastructure - Containers Built',
-            7: 'Infrastructure - Road Network',
-            8: 'Defense - Ramparts Active',
-            9: 'Defense - Towers Online'
+            1: 'Harvesters - Open Spaces / 2',
+            2: 'Upgraders - 3 Required',
+            3: 'Builders + Extensions',
+            4: 'Runners + Repairers + Stationary',
+            5: 'Road Network',
+            6: 'Ramparts - Room Defense',
+            7: 'COMING SOON',
+            8: 'COMING SOON',
+            9: 'COMING SOON'
         };
         return names[phase] || 'Unknown Phase';
     }
@@ -5996,49 +5151,24 @@ class Mokito {
      * Get next phase requirements
      */
     getNextPhaseRequirements(currentPhase, metrics) {
-        const requirements = [];
-        
+        const requiredHarvesters = Math.floor(metrics.totalSourcePositions / 2);
+
         switch (currentPhase) {
-            case 0:
-                requirements.push('2+ harvesters');
-                break;
             case 1:
-                requirements.push('1+ upgrader');
-                break;
+                return [`${requiredHarvesters}+ harvesters (open spaces / 2)`];
             case 2:
-                const minHarvestersForPhase3Req = Math.floor(metrics.totalSourcePositions / 2);
-                requirements.push(`${minHarvestersForPhase3Req}+ harvesters (open spaces / 2)`);
-                requirements.push('1+ builder');
-                requirements.push('5+ extensions');
-                break;
+                return ['3+ upgraders'];
             case 3:
-                requirements.push(`${Math.ceil(metrics.harvesters/2)}+ runners`);
-                requirements.push('Stationary mode');
-                break;
+                return ['3+ builders'];
             case 4:
-                const sources = Math.floor(metrics.totalSourcePositions / 8);
-                requirements.push(`${sources}+ containers`);
-                break;
+                return ['3+ runners', '2+ repairers'];
             case 5:
-                requirements.push('10+ roads');
-                break;
+                return ['10+ roads'];
             case 6:
-                requirements.push('3+ ramparts');
-                requirements.push('RCL 4+');
-                break;
-            case 7:
-                requirements.push(`${metrics.maxTowers}+ towers`);
-                break;
-            case 8:
-                requirements.push('Storage built');
-                requirements.push('RCL 4+');
-                break;
-            case 9:
-                requirements.push('Max phase reached!');
-                break;
+                return ['Ramparts at exits'];
+            default:
+                return ['Phase not yet implemented'];
         }
-        
-        return requirements;
     }
 
     /**
@@ -6053,42 +5183,30 @@ class Mokito {
                 upNext += ' → ' + nextSpawns[1].emoji + ' ' + nextSpawns[1].role;
             }
         }
-        
+
         const nextRequirements = this.getNextPhaseRequirements(phase.current, metrics);
-        
+
         let status = '\n💓 ========== MOKITO HEARTBEAT ==========\n';
         status += `📍 Phase ${phase.current}: ${phase.name}\n`;
-        if (phase.gracePeriod > 0) {
-            status += `   ⚠️  Degrading in ${phase.gracePeriod} ticks\n`;
-        }
-        
+
         // Progress to next phase
-        if (phase.current < 9) {
+        if (phase.current < 6) {
             status += `   Next: ${nextRequirements.join(', ')}\n`;
         }
-        
+
         status += '\n';
         status += `Creeps: H:${metrics.harvesters} R:${metrics.runners} U:${metrics.upgraders} B:${metrics.builders} Rp:${metrics.repairers}\n`;
-        if (metrics.remoteHarvesters > 0 || metrics.haulers > 0) {
-            status += `Remote: RH:${metrics.remoteHarvesters} Ha:${metrics.haulers} C:${metrics.claimers}\n`;
-        }
-        
-        status += `\n`;
         status += `RCL: ${metrics.rcl} | GCL: ${metrics.gcl}\n`;
-        status += `Buildings: Ex:${metrics.extensions}/${metrics.maxExtensions} `;
-        status += `Co:${metrics.containers} Rd:${metrics.roads} `;
-        status += `Ra:${metrics.ramparts} Tw:${metrics.towers}/${metrics.maxTowers}\n`;
-        status += `Storage: ${metrics.storage ? '✅' : '❌'} | `;
-        status += `Sites: ${metrics.constructionSites} | `;
-        status += `Dropped: ${metrics.droppedEnergy}\n`;
-        
+        status += `Buildings: Ex:${metrics.extensions}/${metrics.maxExtensions} Rd:${metrics.roads} Ra:${metrics.ramparts}\n`;
+        status += `Open Spaces: ${metrics.totalSourcePositions} | Dropped: ${metrics.droppedEnergy}\n`;
+
         if (room.memory.waitingForEnergy) {
             status += `⏳ Waiting for energy: ${room.energyAvailable}/${room.energyCapacityAvailable}\n`;
         }
-        
+
         status += `Next Spawn: ${upNext}\n`;
         status += '======================================\n';
-        
+
         console.log(status);
     }
 }

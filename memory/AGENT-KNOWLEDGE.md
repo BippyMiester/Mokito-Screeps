@@ -1,31 +1,36 @@
 # Mokito Screeps Bot - Project Summary
 
 ## Project Overview
-Mokito is an advanced AI bot for [Screeps](https://screeps.com/), a persistent MMO RTS where players control units through JavaScript code. The bot features a multi-phase economy system with stationary harvesting, automatic creep spawning priorities, and intelligent energy distribution.
+Mokito is an AI bot for [Screeps](https://screeps.com/), a persistent MMO RTS where players control units through JavaScript code.
 
-## Current Status (2026-04-17)
-- **Bot Size**: 177.98 KB
+## Current Status (2026-04-18)
+- **Bot Size**: ~220 KB
 - **Modules**: 20
 - **Creep Roles**: 12 implemented
-- **Phases Complete**: 0-9 (100%)
-- **Next Phase**: Phase 10 - Scout Network Enhancement, Military Squad System
+- **Current Phase**: Phases 1-6 (Redesigned)
+- **Phase 7+**: COMING SOON
 
-## Implementation Phases
+## NEW Phase Structure (Redesigned 2026-04-18)
 
-| Phase | Status | Description |
-|-------|--------|-------------|
-| 0 | ✅ Complete | Emergency Mode - Basic survival |
-| 1 | ✅ Complete | Foundation - Harvester, Runner, basic spawning |
-| 2 | ✅ Complete | Stabilization - Upgrader, Builder roles |
-| 3 | ✅ Complete | Capacity - Extension construction |
-| 4 | ✅ Complete | Efficiency - Stationary harvesting, containers |
-| 5 | ✅ Complete | Infrastructure - Road networks |
-| 6 | ✅ Complete | Defense - Ramparts around critical structures |
-| 7 | ✅ Complete | Defense - Tower construction and AI |
-| 8 | ✅ Complete | Storage - Storage construction, energy balancing |
-| 9 | ✅ Complete | Remote Mining - RemoteHarvester, Hauler, Claimer |
-| 10-11 | 🔄 Next | Scout Network, Military Squads |
-| 12+ | ⏳ Pending | Squad Warfare, Expansion, Endgame |
+| Phase | Name | Requirements | Status |
+|-------|------|--------------|--------|
+| 1 | Harvesters | Harvesters = open_spaces / 2 | 🔄 IN PROGRESS |
+| 2 | Upgraders | 3 upgraders | 🔄 IN PROGRESS |
+| 3 | Builders + Extensions | 3 builders | 🔄 IN PROGRESS |
+| 4 | Runners + Repairers + Stationary | 3 runners, 2 repairers, stationary mode | 🔄 IN PROGRESS |
+| 5 | Road Network | 10+ roads | 🔄 IN PROGRESS |
+| 6 | Ramparts (Room Defense) | Ramparts at exits, continuous wall | 🔄 IN PROGRESS |
+| 7+ | COMING SOON | Not yet implemented | ⏳ NOT STARTED |
+
+## Creep Limits (NEW - Per Phase)
+
+| Role | Count | Phase |
+|------|-------|-------|
+| Harvester | open_spaces / 2 | 1 |
+| Upgrader | 3 | 2 |
+| Builder | 3 | 3 |
+| Runner | 3 | 4 |
+| Repairer | 2 | 4 |
 
 ## Architecture
 
@@ -57,46 +62,23 @@ src/
     └── Scout.js              # Intelligence gathering
 ```
 
-### Creep Ratios (Current)
-- **Harvesters**: 1 per open source position (fills all spots around sources)
-- **Runners**: 1 per 2 harvesters
-- **Upgraders**: 1:1 ratio with harvesters
-- **Builders**: 1:1 ratio with upgraders (max 3)
-- **Repairers**: (Builders + Upgraders) / 2 (max 4)
-
-### Key Systems
-1. **Emergency Protocol**: If harvesters < 2, immediately spawn more
-2. **Stationary Mode**: Harvesters drop energy at source; Runners collect
-3. **Defense System**: Tower targeting, Defender spawning, threat detection
-4. **Remote Mining**: Auto-scouts adjacent rooms, spawns RemoteHarvesters/Haulers/Claimers
-5. **Squad Warfare**: 3 attackers + 1 healer coordination for attacks
-
 ## Strategy Documentation
 Located in `/root/bot/strategy/`:
-- **STRATEGY.md** - Complete 20-phase game strategy
-- **TASK_IMPLEMENTATION.md** - Prioritized task list (32 tasks)
-- **BOT_COMPARISON.md** - Analysis of TooAngel, Overmind, Hivemind bots
+- **STRATEGY.md** - Complete phase strategy (NEW phases 1-6)
+- **TASK_IMPLEMENTATION.md** - Task list updated for new phases
+- **BOT_COMPARISON.md** - Analysis of example bots
 - **MILITARY_ANALYSIS.md** - Squad tactics, defense strategies
-- **TESTING_FRAMEWORK.md** - Testing approach for Screeps environment
+- **TESTING_FRAMEWORK.md** - Testing approach
 
 ## Build Process
 - Source code in `src/` is modular JavaScript
 - `build.js` bundles modules into single `main.js` for deployment
 - Deploy `main.js` to Screeps IDE or via API
 
-## Key User Preferences
-- Multi-line heartbeat output (every 60 ticks)
-- Wait for full energy before spawning (for maximum body parts)
-- All creeps upgrade controller when idle
-- Obstacle avoidance: Harvesters request other creeps to move
-- Screeps server running via systemd (tick rate: 250ms)
-- Steam API key stored in `.env` file
-
 ## Server Management
 ```bash
 systemctl start/stop/restart screeps  # Server control
-node cli/set-tickrate.js 250          # Set tick rate
-node cli/reset-server.js              # Reset server data
+node cli/reset-server.js              # Reset server data (USE THIS, don't restart)
 ```
 
 ## Memory System
@@ -105,14 +87,12 @@ Session logs stored in `/root/bot/memory/`:
 - `YYYY-MM-DD.md` - Daily development logs
 - `index.md` - Memory index
 
-## Derived From
-Analysis of 3 top-tier Screeps bots:
-- **TooAngel** - Squad warfare, comprehensive roles (40+), room planning
-- **Overmind** - Colony-based architecture, TypeScript, task queuing
-- **Hivemind (Mirroar)** - Empire management, inter-shard operations
+## Next Tasks (Focus on Phases 1-6)
+1. Complete Phase 1: Harvester spawning with correct formula
+2. Complete Phase 2: 3 upgraders
+3. Complete Phase 3: 3 builders + extensions
+4. Complete Phase 4: 3 runners + 2 repairers + stationary mode
+5. Complete Phase 5: Road network
+6. Complete Phase 6: Ramparts with no openings
 
-## Next Tasks (Phase 10-11)
-1. Enhance Scout role with comprehensive intelligence gathering
-2. Implement room threat assessment and hostile identification
-3. Complete military squad coordination system (Attackers + Healers)
-4. Add squad formation waiting and group movement logic
+*Last Updated: 2026-04-18*

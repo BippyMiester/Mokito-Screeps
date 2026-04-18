@@ -41,11 +41,14 @@ class SpawnManager {
         const nextSpawns = this.getNextSpawnPriority(room, harvesters.length, upgraders.length, builders.length, repairers.length, runners.length, totalSourcePositions);
         room.memory.spawnPriority = nextSpawns;
 
-        // Energy budget: Maintain 35% reserve
-        const minReserve = Math.floor(energyCapacity * 0.35);
+        // Energy budget logic
+        // Phase 1 (no creeps): Use full energy to bootstrap
+        // Later phases: Maintain 35% reserve for emergencies
+        const minReserve = creeps.length < 3 ? 0 : Math.floor(energyCapacity * 0.35);
         const usableEnergy = energyAvailable - minReserve;
 
-        if (usableEnergy < 200) {
+        // Minimum 200 energy needed for basic creep [WORK, CARRY, MOVE]
+        if (energyAvailable < 200) {
             room.memory.waitingForEnergy = true;
             return;
         }

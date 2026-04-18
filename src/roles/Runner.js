@@ -293,21 +293,53 @@ class Runner {
         }
         
         // If all targets are full or none available
-        // Drop energy so we can collect more, or wait near spawn
+        // Try to build, repair, or upgrade instead of wasting energy
         if (creep.store[RESOURCE_ENERGY] > 0) {
-            // Find spawn to drop near
+            // Priority 1: Build construction sites
+            const constructionSite = creep.pos.findClosestByPath(FIND_CONSTRUCTION_SITES);
+            if (constructionSite) {
+                if (creep.build(constructionSite) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(constructionSite, { visualizePathStyle: { stroke: '#ffaa00' } });
+                }
+                creep.say('🔨 build');
+                return;
+            }
+            
+            // Priority 2: Repair damaged structures
+            const repairTarget = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+                filter: s => (s.structureType === STRUCTURE_ROAD ||
+                             s.structureType === STRUCTURE_CONTAINER) &&
+                             s.hits < s.hitsMax
+            });
+            if (repairTarget) {
+                if (creep.repair(repairTarget) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(repairTarget);
+                }
+                creep.say('🔧 repair');
+                return;
+            }
+            
+            // Priority 3: Upgrade controller
+            const controller = creep.room.controller;
+            if (controller) {
+                if (creep.upgradeController(controller) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(controller);
+                }
+                creep.say('⚡ upgrade');
+                return;
+            }
+            
+            // Last resort: Drop energy near spawn
             const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
             if (spawn) {
                 if (!creep.pos.inRangeTo(spawn, 2)) {
                     creep.moveTo(spawn, { range: 2 });
                 } else {
-                    // Near spawn - drop energy so we can keep collecting
                     creep.drop(RESOURCE_ENERGY);
                     creep.memory.delivering = false;
                     creep.say('💧 drop');
                 }
             } else {
-                // No spawn? Just drop here
                 creep.drop(RESOURCE_ENERGY);
                 creep.memory.delivering = false;
                 creep.say('💧 drop');

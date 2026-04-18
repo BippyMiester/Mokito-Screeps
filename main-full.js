@@ -732,21 +732,53 @@ class Runner {
         }
         
         // If all targets are full or none available
-        // Drop energy so we can collect more, or wait near spawn
+        // Try to build, repair, or upgrade instead of wasting energy
         if (creep.store[RESOURCE_ENERGY] > 0) {
-            // Find spawn to drop near
+            // Priority 1: Build construction sites
+            const constructionSite = creep.pos.findClosestByPath(FIND_CONSTRUCTION_SITES);
+            if (constructionSite) {
+                if (creep.build(constructionSite) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(constructionSite, { visualizePathStyle: { stroke: '#ffaa00' } });
+                }
+                creep.say('🔨 build');
+                return;
+            }
+            
+            // Priority 2: Repair damaged structures
+            const repairTarget = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+                filter: s => (s.structureType === STRUCTURE_ROAD ||
+                             s.structureType === STRUCTURE_CONTAINER) &&
+                             s.hits < s.hitsMax
+            });
+            if (repairTarget) {
+                if (creep.repair(repairTarget) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(repairTarget);
+                }
+                creep.say('🔧 repair');
+                return;
+            }
+            
+            // Priority 3: Upgrade controller
+            const controller = creep.room.controller;
+            if (controller) {
+                if (creep.upgradeController(controller) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(controller);
+                }
+                creep.say('⚡ upgrade');
+                return;
+            }
+            
+            // Last resort: Drop energy near spawn
             const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
             if (spawn) {
                 if (!creep.pos.inRangeTo(spawn, 2)) {
                     creep.moveTo(spawn, { range: 2 });
                 } else {
-                    // Near spawn - drop energy so we can keep collecting
                     creep.drop(RESOURCE_ENERGY);
                     creep.memory.delivering = false;
                     creep.say('💧 drop');
                 }
             } else {
-                // No spawn? Just drop here
                 creep.drop(RESOURCE_ENERGY);
                 creep.memory.delivering = false;
                 creep.say('💧 drop');
@@ -3447,12 +3479,22 @@ class ConstructionManager {
             };
         }
         
-        // Build based on RCL
-        this.buildEssentials(room, spawn);
+        // Check current phase - only build appropriate structures
+        const currentPhase = this.getCurrentPhase(room);
         
+        // Phase 1-4: No roads, only essentials (extensions)
         if (rcl >= 2) {
             this.buildExtensions(room);
-            this.buildDefensiveWalls(room); // Phase 6: Walls with 1 rampart per exit
+        }
+        
+        // Phase 5+: Build roads
+        if (currentPhase >= 5) {
+            this.buildEssentials(room, spawn);
+        }
+        
+        // Phase 6: Build defensive walls with ramparts
+        if (currentPhase >= 6) {
+            this.buildDefensiveWalls(room);
         }
         
         if (rcl >= 3) {
@@ -3467,6 +3509,57 @@ class ConstructionManager {
         if (rcl >= 5) {
             this.buildWalls(room); // Phase 6+: Walls at exits (RCL 5+)
         }
+    }
+    
+    /**
+     * Determine current phase based on room state
+     */
+    getCurrentPhase(room) {
+        const creeps = room.find(FIND_MY_CREEPS);
+        const harvesters = creeps.filter(c => c.memory.role === 'harvester').length;
+        const upgraders = creeps.filter(c => c.memory.role === 'upgrader').length;
+        const builders = creeps.filter(c => c.memory.role === 'builder').length;
+        const repairers = creeps.filter(c => c.memory.role === 'repairer').length;
+        const runners = creeps.filter(c => c.memory.role === 'runner').length;
+        
+        const extensions = room.find(FIND_MY_STRUCTURES, {
+            filter: { structureType: STRUCTURE_EXTENSION }
+        }).length;
+        const roads = room.find(FIND_STRUCTURES, {
+            filter: { structureType: STRUCTURE_ROAD }
+        }).length;
+        const ramparts = room.find(FIND_MY_STRUCTURES, {
+            filter: { structureType: STRUCTURE_RAMPART }
+        }).length;
+        
+        // Calculate required harvesters
+        const sources = room.find(FIND_SOURCES);
+        let totalSourcePositions = 0;
+        for (const source of sources) {
+            const terrain = room.getTerrain();
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const x = source.pos.x + dx;
+                    const y = source.pos.y + dy;
+                    if (x >= 0 && x <= 49 && y >= 0 && y <= 49) {
+                        if (terrain.get(x, y) !== TERRAIN_MASK_WALL) {
+                            totalSourcePositions++;
+                        }
+                    }
+                }
+            }
+        }
+        const requiredHarvesters = Math.ceil(totalSourcePositions / 2);
+        
+        // Check each phase
+        if (harvesters < requiredHarvesters) return 1;
+        if (upgraders < 3) return 2;
+        if (builders < 3 || extensions < 5) return 3;
+        if (runners < 3 || repairers < 2) return 4;
+        if (roads < 10) return 5;
+        if (ramparts < 3) return 6;
+        return 6; // Max phase
     }
     
     /**
@@ -3826,10 +3919,12 @@ class ConstructionManager {
     
     buildDefensiveWalls(room) {
         // Phase 6: Build walls at room entrances with 1 rampart per exit
-        // Strategy: Build walls along exit line, place 1 rampart in center for clear path
-        // Rampart allows walking through, creating a chokepoint
+        // Strategy: Build walls along exit line, place 1 rampart at position with shortest path to spawn
+        // Rampart allows walking through, creating a chokepoint at the optimal location
         
         const exitDirections = [FIND_EXIT_TOP, FIND_EXIT_RIGHT, FIND_EXIT_BOTTOM, FIND_EXIT_LEFT];
+        const spawn = room.find(FIND_MY_SPAWNS)[0];
+        if (!spawn) return;
         
         for (const exitDir of exitDirections) {
             const exitPositions = room.find(exitDir);
@@ -3840,13 +3935,28 @@ class ConstructionManager {
             
             if (defensivePositions.length === 0) continue;
             
-            // Find center position for rampart - this creates the clear path
-            const centerIndex = Math.floor(defensivePositions.length / 2);
+            // Find the position with shortest total path (exit -> position -> spawn)
+            let bestIndex = 0;
+            let shortestDistance = Infinity;
             
-            // Build walls at all positions except center (rampart)
             for (let i = 0; i < defensivePositions.length; i++) {
                 const pos = defensivePositions[i];
-                const isCenter = (i === centerIndex);
+                // Calculate distance from exit to this position to spawn
+                const exitPos = exitPositions[Math.floor(exitPositions.length / 2)]; // Center of exit
+                const distToExit = pos.getRangeTo(exitPos);
+                const distToSpawn = pos.getRangeTo(spawn);
+                const totalDist = distToExit + distToSpawn;
+                
+                if (totalDist < shortestDistance) {
+                    shortestDistance = totalDist;
+                    bestIndex = i;
+                }
+            }
+            
+            // Build walls at all positions except best position (rampart)
+            for (let i = 0; i < defensivePositions.length; i++) {
+                const pos = defensivePositions[i];
+                const isBestPath = (i === bestIndex);
                 
                 // Skip if there's already a structure or construction site
                 const structures = pos.lookFor(LOOK_STRUCTURES);
@@ -3861,8 +3971,8 @@ class ConstructionManager {
                 
                 if (hasWallSite || hasRampartSite) continue;
                 
-                // Place rampart at center (creates clear path), walls elsewhere (blocks path)
-                if (isCenter) {
+                // Place rampart at best path position, walls elsewhere
+                if (isBestPath) {
                     pos.createConstructionSite(STRUCTURE_RAMPART);
                 } else {
                     pos.createConstructionSite(STRUCTURE_WALL);

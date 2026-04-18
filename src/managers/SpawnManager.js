@@ -766,22 +766,23 @@ class SpawnManager {
             if (priorities.length >= 2) return priorities;
         }
 
-        // PHASE 2: Fill harvester positions
-        if (harvesters.length < totalSourcePositions) {
+        // PHASE 2: Fill harvester positions - only need open spaces / 2
+        const maxHarvestersForPriority = Math.floor(totalSourcePositions / 2);
+        if (harvesters.length < maxHarvestersForPriority) {
             priorities.push({
                 role: 'harvester',
                 emoji: '🌱',
-                reason: harvesters.length + '/' + totalSourcePositions + ' positions filled',
+                reason: harvesters.length + '/' + maxHarvestersForPriority + ' harvesters (open spaces / 2)',
                 priority: 1
             });
             if (priorities.length >= 2) return priorities;
             
             // Second harvester if still needed
-            if (harvesters.length + 1 < totalSourcePositions) {
+            if (harvesters.length + 1 < maxHarvestersForPriority) {
                 priorities.push({
                     role: 'harvester',
                     emoji: '🌱',
-                    reason: 'Filling source positions',
+                    reason: 'Filling harvester count',
                     priority: 2
                 });
                 return priorities;
@@ -789,8 +790,9 @@ class SpawnManager {
         }
 
         // PHASE 3 (Stationary Mode): Spawn Runners
-        if (harvesters.length >= totalSourcePositions) {
-            const desiredRunners = Math.ceil(harvesters.length / 2);
+        // Trigger when we have minimum harvesters needed (open spaces / 2)
+        if (harvesters.length >= maxHarvestersForPriority) {
+            const desiredRunners = Math.min(3, Math.ceil(harvesters.length / 2));
             if (runners.length < desiredRunners) {
                 priorities.push({
                     role: 'runner',
@@ -812,7 +814,7 @@ class SpawnManager {
             }
 
             // PHASE 3: Spawn Upgraders
-            const desiredUpgraders = Math.max(1, harvesters.length);
+            const desiredUpgraders = Math.min(3, Math.max(1, harvesters.length));
             if (upgraders.length < desiredUpgraders) {
                 priorities.push({
                     role: 'upgrader',

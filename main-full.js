@@ -5080,9 +5080,11 @@ class Mokito {
                        metrics.upgraders >= 3;
 
             case 3: // Phase 3: Builders + Extensions
+                // Must have 5 extensions FULLY BUILT (not just construction sites)
                 return metrics.harvesters >= requiredHarvesters &&
                        metrics.upgraders >= 3 &&
-                       metrics.builders >= 3;
+                       metrics.builders >= 3 &&
+                       metrics.extensions >= 5;
 
             case 4: // Phase 4: Runners + Repairers (Stationary)
                 return metrics.harvesters >= requiredHarvesters &&
@@ -5167,7 +5169,7 @@ class Mokito {
             case 2:
                 return ['3+ upgraders'];
             case 3:
-                return ['3+ builders'];
+                return ['3+ builders', '5+ extensions BUILT'];
             case 4:
                 return ['3+ runners', '2+ repairers'];
             case 5:

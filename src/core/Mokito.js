@@ -211,7 +211,7 @@ class Mokito {
             case 6: // Phase 6: Ramparts
                 // Must STILL have 5 extensions built
                 if (!this.checkPhaseCriteria(5, metrics)) return false;
-                return metrics.extensions >= 5 && metrics.ramparts >= 3 && metrics.rcl >= 4;
+                return metrics.extensions >= 5 && metrics.ramparts >= 3;
 
             case 7: // Phase 7+: COMING SOON
             case 8:
@@ -286,7 +286,7 @@ class Mokito {
             case 4:
                 return ['10+ roads (for Phase 5)'];
             case 5:
-                return ['RCL 4+ required for ramparts'];
+                return ['Ramparts at exits (for Phase 6)'];
             case 6:
                 return ['Phase 6 complete!'];
             default:

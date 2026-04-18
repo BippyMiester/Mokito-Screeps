@@ -3447,6 +3447,7 @@ class ConstructionManager {
         
         if (rcl >= 2) {
             this.buildExtensions(room);
+            this.buildRamparts(room); // Phase 6: Ramparts (available at RCL 2)
         }
         
         if (rcl >= 3) {
@@ -3456,7 +3457,6 @@ class ConstructionManager {
         
         if (rcl >= 4) {
             this.buildStorage(room); // Phase 8: Storage (RCL 4 unlocks storage)
-            this.buildRamparts(room); // Phase 6: Ramparts (RCL 4 unlocks ramparts)
         }
         
         if (rcl >= 5) {
@@ -3821,9 +3821,6 @@ class ConstructionManager {
     
     buildRamparts(room) {
         // Phase 6: Build ramparts at room entrances to defend against invaders
-        // Requires RCL 4+
-        if (room.controller.level < 4) return;
-        
         // Strategy: Build ramparts 2 tiles from exits in a line until hitting walls
         // This forces enemies to walk through a chokepoint protected by ramparts
         
@@ -5179,7 +5176,7 @@ class Mokito {
             case 6: // Phase 6: Ramparts
                 // Must STILL have 5 extensions built
                 if (!this.checkPhaseCriteria(5, metrics)) return false;
-                return metrics.extensions >= 5 && metrics.ramparts >= 3 && metrics.rcl >= 4;
+                return metrics.extensions >= 5 && metrics.ramparts >= 3;
 
             case 7: // Phase 7+: COMING SOON
             case 8:
@@ -5254,7 +5251,7 @@ class Mokito {
             case 4:
                 return ['10+ roads (for Phase 5)'];
             case 5:
-                return ['RCL 4+ required for ramparts'];
+                return ['Ramparts at exits (for Phase 6)'];
             case 6:
                 return ['Phase 6 complete!'];
             default:

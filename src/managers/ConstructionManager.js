@@ -35,6 +35,7 @@ class ConstructionManager {
         
         if (rcl >= 2) {
             this.buildExtensions(room);
+            this.buildRamparts(room); // Phase 6: Ramparts (available at RCL 2)
         }
         
         if (rcl >= 3) {
@@ -44,7 +45,6 @@ class ConstructionManager {
         
         if (rcl >= 4) {
             this.buildStorage(room); // Phase 8: Storage (RCL 4 unlocks storage)
-            this.buildRamparts(room); // Phase 6: Ramparts (RCL 4 unlocks ramparts)
         }
         
         if (rcl >= 5) {
@@ -409,9 +409,6 @@ class ConstructionManager {
     
     buildRamparts(room) {
         // Phase 6: Build ramparts at room entrances to defend against invaders
-        // Requires RCL 4+
-        if (room.controller.level < 4) return;
-        
         // Strategy: Build ramparts 2 tiles from exits in a line until hitting walls
         // This forces enemies to walk through a chokepoint protected by ramparts
         
